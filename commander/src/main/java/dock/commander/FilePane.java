@@ -648,12 +648,28 @@ public final class FilePane extends JPanel {
             loadNavigate(fs, fs.normalize(target));
             return;
         }
-        int bang = target.indexOf('!');
-        if (bang > 0) {
-            mountAt(target.substring(0, bang), target.substring(bang + 1));
+        String mount = archiveMountTarget(target);
+        if (mount != null) {
+            mountAt(mount, target.substring(mount.length() + 1));
             return;
         }
         loadNavigate(fs, fs.normalize(target));
+    }
+
+    /**
+     * The archive-interior "foo.zip!/inner" address applies only when the
+     * pre-bang segment names an archive. A directory whose own name simply
+     * carries a '!' navigates like any other folder — those are common on
+     * real servers. Returns the archive path to mount, or null. Pure, so
+     * the rule is testable without I/O.
+     */
+    static String archiveMountTarget(String target) {
+        int bang = target.indexOf('!');
+        if (bang <= 0) return null;
+        String outer = target.substring(0, bang);
+        int cut = Math.max(outer.lastIndexOf('/'), outer.lastIndexOf('\\'));
+        String name = cut < 0 ? outer : outer.substring(cut + 1);
+        return FileIcons.kindOf(name) == FileIcons.Kind.ARCHIVE ? outer : null;
     }
 
     /** Navigates a specific filesystem — host crumbs, mount exits. */
