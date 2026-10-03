@@ -1,0 +1,7 @@
+.gradle/
+build/
+out/
+*.log
+/screenshots/
+app/vlc/
+.idea/

@@ -1,0 +1,76 @@
+# Every third-party version in the project, declared once. Modules
+# reference these via `libs.*` so versions never drift between modules.
+
+[versions]
+flatlaf = "3.7.2"
+sshd = "2.19.0"
+eddsa = "0.3.0"
+smbj = "0.13.0"
+bcpkix = "1.78.1"
+mbassador = "1.3.0"
+sardine = "5.13"
+commonsNet = "3.13.0"
+commonsCompress = "1.27.1"
+tukaaniXz = "1.10"
+jediterm = "3.76"
+jeditermTypeahead = "2.69"
+twelvemonkeys = "3.12.0"
+image4j = "0.7.2"
+svgSalamander = "1.1.3"
+commonmark = "0.30.0"
+rsyntaxtextarea = "4.0.1"
+vlcj = "4.8.2"
+jna = "5.17.0"
+slf4j = "2.0.16"
+jackson = "2.19.2"
+junit = "5.12.2"
+
+[libraries]
+flatlaf = { module = "com.formdev:flatlaf", version.ref = "flatlaf" }
+sshd-core = { module = "org.apache.sshd:sshd-core", version.ref = "sshd" }
+sshd-sftp = { module = "org.apache.sshd:sshd-sftp", version.ref = "sshd" }
+eddsa = { module = "net.i2p.crypto:eddsa", version.ref = "eddsa" }
+smbj = { module = "com.hierynomus:smbj", version.ref = "smbj" }
+bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bcpkix" }
+mbassador = { module = "net.engio:mbassador", version.ref = "mbassador" }
+sardine = { module = "com.github.lookfirst:sardine", version.ref = "sardine" }
+commons-net = { module = "commons-net:commons-net", version.ref = "commonsNet" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
+# Runtime requirement of Commons Compress's XZ streams.
+xz = { module = "org.tukaani:xz", version.ref = "tukaaniXz" }
+jediterm-ui = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
+jediterm-core = { module = "org.jetbrains.jediterm:jediterm-core", version.ref = "jediterm" }
+jediterm-typeahead = { module = "org.jetbrains.jediterm:jediterm-typeahead", version.ref = "jeditermTypeahead" }
+# Viewer decoders. TwelveMonkeys ships as one versioned family: WebP
+# (decode-only) and PSD ride its ImageIO SPIs; its JPEG plugin also repairs
+# CMYK/odd-variant JPEGs the JDK reader rejects. image4j covers ICO,
+# svgSalamander (FormDev-maintained) renders vector SVG.
+imageio-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "twelvemonkeys" }
+imageio-psd = { module = "com.twelvemonkeys.imageio:imageio-psd", version.ref = "twelvemonkeys" }
+imageio-jpeg = { module = "com.twelvemonkeys.imageio:imageio-jpeg", version.ref = "twelvemonkeys" }
+image4j = { module = "net.ifok.image:image4j", version.ref = "image4j" }
+svg-salamander = { module = "com.formdev:svgSalamander", version.ref = "svgSalamander" }
+# Markdown viewer. commonmark-java ships as one versioned family: the core
+# CommonMark parser plus the GFM tables/strikethrough/task-list and autolink
+# extensions the renderer walks.
+commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
+commonmark-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version.ref = "commonmark" }
+commonmark-strikethrough = { module = "org.commonmark:commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
+commonmark-task-list = { module = "org.commonmark:commonmark-ext-task-list-items", version.ref = "commonmark" }
+commonmark-autolink = { module = "org.commonmark:commonmark-ext-autolink", version.ref = "commonmark" }
+# Syntax highlighting. RSyntaxTextArea ships a pure-Java lexer family
+# (59 languages, zero natives); only its TokenMakers run here — the Swing
+# component never leaves the library.
+rsyntaxtextarea = { module = "com.fifesoft:rsyntaxtextarea", version.ref = "rsyntaxtextarea" }
+# Media playback. vlcj is the Java framework only — the LibVLC runtime rides
+# with the app (the pinned downloadVlc task unpacks the official VideoLAN
+# build next to it; batteries included, no external player required). vlcj
+# 4.x targets VLC 3.x; the 5.x line wants the unreleased VLC 4.
+vlcj = { module = "uk.co.caprica:vlcj", version.ref = "vlcj" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+slf4j-nop = { module = "org.slf4j:slf4j-nop", version.ref = "slf4j" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+# Versionless on purpose: Gradle aligns the launcher with the JUnit
+# platform version implied by the jupiter dependency.
+junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
