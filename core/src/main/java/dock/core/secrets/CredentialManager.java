@@ -21,6 +21,11 @@ public final class CredentialManager {
         return store().available();
     }
 
+    /** The OS store's name for UI text ("Keychain"). */
+    public static String storeName() {
+        return store().displayName();
+    }
+
     public static void save(String target, String secret) {
         if (!available() || secret == null) return;
         delete(target);

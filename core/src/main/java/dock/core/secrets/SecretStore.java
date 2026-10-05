@@ -10,6 +10,9 @@ public interface SecretStore {
     /** False when this OS has no supported store; every other call is then a no-op. */
     boolean available();
 
+    /** The store as the user knows it, for UI text ("Keychain"). */
+    String displayName();
+
     /** Stores a secret under a target that holds nothing yet. */
     void write(String target, String secret);
 
@@ -22,6 +25,7 @@ public interface SecretStore {
     /** The store of an OS without one: nothing is ever kept. */
     SecretStore NONE = new SecretStore() {
         @Override public boolean available() { return false; }
+        @Override public String displayName() { return "no credential store"; }
         @Override public void write(String target, String secret) {}
         @Override public String read(String target) { return null; }
         @Override public void remove(String target) {}

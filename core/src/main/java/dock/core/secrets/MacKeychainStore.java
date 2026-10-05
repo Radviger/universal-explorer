@@ -50,6 +50,10 @@ public final class MacKeychainStore implements SecretStore {
         return true;
     }
 
+    @Override public String displayName() {
+        return "Keychain";
+    }
+
     @Override public void write(String target, String secret) {
         byte[] service = utf8(target);
         byte[] data = utf8(secret);

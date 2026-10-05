@@ -82,7 +82,7 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     private final JComboBox<String> authCombo = new JComboBox<>();
     private JLabel authLabel;
     private final JPasswordField passwordField = new JPasswordField();
-    private final JCheckBox savePassword = new JCheckBox("Save password in Windows Credential Manager");
+    private final JCheckBox savePassword = savePasswordBox();
     private final JTextField keyField = new JTextField();
     private final JPasswordField passphraseField = new JPasswordField();
     private final JTextField shareField = new JTextField();
@@ -98,6 +98,16 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     private static final Color SUCCESS_GREEN = new Color(0x30A46C);
     private final JButton connectButton = new JButton("Connect");
     private final JButton testButton = new JButton("Test Connection");
+
+    /** Names this OS's store; without one the option shows but cannot be had. */
+    private static JCheckBox savePasswordBox() {
+        if (CredentialManager.available()) {
+            return new JCheckBox("Save password in " + CredentialManager.storeName());
+        }
+        JCheckBox box = new JCheckBox("Saving passwords is not supported on this system");
+        box.setEnabled(false);
+        return box;
+    }
     private String idleText = "Connect";
     private String busyText = "Connecting…";
 

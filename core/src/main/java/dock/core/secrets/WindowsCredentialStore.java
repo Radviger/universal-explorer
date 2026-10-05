@@ -66,6 +66,10 @@ public final class WindowsCredentialStore implements SecretStore {
         return true;
     }
 
+    @Override public String displayName() {
+        return "Windows Credential Manager";
+    }
+
     @Override public void write(String target, String secret) {
         List<Memory> keepAlive = new ArrayList<>();
         byte[] blob = secret.getBytes(StandardCharsets.UTF_8);
