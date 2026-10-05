@@ -1,14 +1,12 @@
 package dock.media;
 
-import com.sun.jna.NativeLibrary;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.lang.invoke.MethodHandles;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import javax.swing.JComponent;
+import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
 import uk.co.caprica.vlcj.media.AudioTrackInfo;
 import uk.co.caprica.vlcj.media.VideoTrackInfo;
 import uk.co.caprica.vlcj.player.base.MediaPlayer;
@@ -23,12 +21,9 @@ import uk.co.caprica.vlcj.player.component.callback.ScaledCallbackImagePainter;
  * reports state through {@link MediaEngine.Listener}.
  *
  * <p><b>Native discovery</b> — batteries included: the app ships the
- * official VLC runtime in an {@code app/vlc/} directory, found from the
- * working directory (Gradle {@code run}, jpackage app dir) or beside the
- * classpath; a {@code dock.vlc} property or {@code DOCK_VLC} environment
- * variable overrides, and a system install is the last resort. The plugin
- * tree sits next to {@code libvlc.dll}, which is where libVLC looks for it
- * anyway (portable-VLC layout), so no environment surgery is needed.
+ * official VLC runtime in an {@code app/vlc/} directory, and a system
+ * install is the fallback. Where to look and how to load on each OS lives
+ * in {@link VlcRuntime}.
  */
 final class VlcEngine implements MediaEngine {
 
@@ -39,54 +34,21 @@ final class VlcEngine implements MediaEngine {
     private MediaEngine.Listener listener = MediaEngine.Listener.NOTHING;
     private volatile MediaEngine.Overlay overlay;
 
-    /** Where JNA should look for the VLC libraries before anything loads. */
+    /** Finds and loads the runtime once; callers are off the EDT (the
+     *  factories' contract), since this loads natives. */
     private static synchronized Path discover() {
         Path found = home;
         if (found != null) return found;
-        for (Path candidate : candidates()) {
-            if (Files.isRegularFile(candidate.resolve("libvlc.dll"))) {
-                // Register before the first LibVLC class initialization;
-                // JNA resolves "vlc"/"libvlc" against these paths, trying
-                // the lib-prefixed spelling on Windows.
-                NativeLibrary.addSearchPath("vlc", candidate.toString());
-                NativeLibrary.addSearchPath("libvlc", candidate.toString());
-                home = found = candidate;
-                return found;
-            }
-        }
-        home = Path.of("");   // negative result caches too — probing is not free
-        return Path.of("");
-    }
-
-    private static List<Path> candidates() {
-        java.util.ArrayList<Path> out = new java.util.ArrayList<>();
-        String explicit = System.getProperty("dock.vlc");
-        if (explicit != null && !explicit.isBlank()) out.add(Path.of(explicit));
-        String env = System.getenv("DOCK_VLC");
-        if (env != null && !env.isBlank()) out.add(Path.of(env));
-        // The bundled copy: the working directory (Gradle run lands in
-        // app/, the packaged app in its install dir) and its parents cover
-        // every launch shape, and the classpath location covers IDE runs.
-        for (Path p = Path.of("").toAbsolutePath(); p != null; p = p.getParent()) {
-            out.add(p.resolve("vlc"));
-            if (out.size() > 8) break;   // don't walk to the drive root
-        }
-        out.add(codeLocation().resolve("vlc"));
-        String pf = System.getenv("ProgramFiles");
-        if (pf != null) out.add(Path.of(pf, "VideoLAN", "VLC"));
-        String pf86 = System.getenv("ProgramFiles(x86)");
-        if (pf86 != null) out.add(Path.of(pf86, "VideoLAN", "VLC"));
-        return out;
-    }
-
-    private static Path codeLocation() {
+        VlcRuntime runtime = VlcRuntime.forThisMachine();
+        boolean loaded;
         try {
-            var loc = MethodHandles.lookup().lookupClass()
-                    .getProtectionDomain().getCodeSource().getLocation();
-            return Path.of(loc.toURI()).getParent();
-        } catch (Exception e) {
-            return Path.of(".");
+            loaded = new NativeDiscovery(runtime).discover();
+        } catch (Throwable t) {
+            loaded = false;   // a broken runtime is a missing engine, not a crash
         }
+        found = loaded && runtime.home() != null ? runtime.home() : Path.of("");
+        home = found;   // negative result caches too — probing is not free
+        return found;
     }
 
     /** True when a VLC runtime was found; the factory returns null if not. */
