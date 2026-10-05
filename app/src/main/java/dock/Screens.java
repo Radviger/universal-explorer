@@ -97,6 +97,8 @@ public final class Screens {
         // connectSite/touch would also mutate).
         Path config = Files.createTempDirectory("dock-screens-config");
         dock.core.config.AppPaths.override(config);
+        // Nor the developer's ~/.ssh/config hosts: the shots stay fixed.
+        dock.core.config.AppSettings.setFlag(dock.core.config.AppSettings.SSH_CONFIG_HOSTS, false);
         long day = 86_400_000L;
         long now = System.currentTimeMillis();
         Files.writeString(config.resolve("sessions.json"), """

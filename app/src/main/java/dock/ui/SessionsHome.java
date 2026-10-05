@@ -79,12 +79,17 @@ public final class SessionsHome extends JPanel {
         void quickConnect(String typed);
 
         void editSite(Site site);
+
+        /** The hosts of ~/.ssh/config to list beside the saved sessions,
+         *  read fresh on every refresh; empty when that mode is off. */
+        default List<Site> sshConfigSites() { return List.of(); }
     }
 
     private static final int CARD_WIDTH = 560;
     private static final int ROW_HEIGHT = 52;
     private static final int BUSY_STRIP_HEIGHT = 4;
     private static final int MAX_VISIBLE_ROWS = 8;
+    private static final int SECTION_HEIGHT = 28;
 
     /** The launcher's per-protocol mark, from the backend registry. */
     private static String protocolGlyph(dock.core.config.Protocol protocol) {
@@ -97,6 +102,8 @@ public final class SessionsHome extends JPanel {
     private JTextField searchField;
     private JLabel noMatchLabel;
     private JPanel rowsPanel;
+    /** The ~/.ssh/config section's caption; null when that section is empty. */
+    private JLabel sshHeader;
 
     public SessionsHome(Host host) {
         this.host = host;
@@ -104,15 +111,20 @@ public final class SessionsHome extends JPanel {
         refresh();
     }
 
-    /** Rebuilds from sessions.json (recency order); also swaps hero/launcher. */
+    /** Rebuilds from sessions.json (recency order) plus the ~/.ssh/config
+     *  hosts no saved session already names; also swaps hero/launcher. */
     public void refresh() {
         removeAll();
         rows.clear();
         List<Site> sites = Sites.byRecency(Sites.load());
-        if (sites.isEmpty()) {
+        java.util.Set<String> saved = new java.util.HashSet<>();
+        for (Site s : sites) saved.add(s.name());
+        List<Site> sshSites = host.sshConfigSites().stream()
+                .filter(s -> !saved.contains(s.name())).toList();
+        if (sites.isEmpty() && sshSites.isEmpty()) {
             add(new EmptyState(host::newSession));
         } else {
-            add(buildLauncher(sites));
+            add(buildLauncher(sites, sshSites));
         }
         revalidate();
         repaint();
@@ -192,7 +204,7 @@ public final class SessionsHome extends JPanel {
 
     // ---- construction ----
 
-    private JComponent buildLauncher(List<Site> sites) {
+    private JComponent buildLauncher(List<Site> sites, List<Site> sshSites) {
         JPanel column = new JPanel();
         column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
         column.setOpaque(false);
@@ -205,18 +217,18 @@ public final class SessionsHome extends JPanel {
         column.add(Box.createVerticalStrut(Tokens.GAP_1));
         column.add(body("Click a session to connect"));
         column.add(Box.createVerticalStrut(Tokens.GAP_6));
-        column.add(new LauncherCard(sites));
+        column.add(new LauncherCard(sites, sshSites));
         return column;
     }
 
     private final class LauncherCard extends CardPanel {
 
-        private LauncherCard(List<Site> sites) {
+        private LauncherCard(List<Site> sites, List<Site> sshSites) {
             super(new BorderLayout());
             setMaximumSize(new Dimension(CARD_WIDTH, Integer.MAX_VALUE));
 
             add(buildSearchArea(), BorderLayout.NORTH);
-            add(buildRowsArea(sites), BorderLayout.CENTER);
+            add(buildRowsArea(sites, sshSites), BorderLayout.CENTER);
             add(buildFooter(), BorderLayout.SOUTH);
         }
 
@@ -303,7 +315,7 @@ public final class SessionsHome extends JPanel {
         return chrome;
     }
 
-    private JComponent buildRowsArea(List<Site> sites) {
+    private JComponent buildRowsArea(List<Site> sites, List<Site> sshSites) {
         // Preferred width must stay at zero: a wide preferred (e.g. from a
         // row's text) makes the scroll view report more than the viewport
         // width, and with the horizontal scrollbar off the excess clips off
@@ -326,9 +338,26 @@ public final class SessionsHome extends JPanel {
         rowsPanel.add(noMatchLabel);
 
         for (Site s : sites) {
-            Row row = new Row(s);
+            Row row = new Row(s, false);
             rows.add(row);
             rowsPanel.add(row);
+        }
+        sshHeader = null;
+        if (!sshSites.isEmpty()) {
+            sshHeader = new JLabel("From ~/.ssh/config");
+            sshHeader.setFont(FontRegistry.uiMedium(11));
+            sshHeader.setForeground(muted());
+            sshHeader.setAlignmentX(LEFT_ALIGNMENT);
+            sshHeader.setBorder(BorderFactory.createEmptyBorder(Tokens.GAP_2, Tokens.GAP_3,
+                    Tokens.GAP_1, Tokens.GAP_3));
+            sshHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, SECTION_HEIGHT));
+            sshHeader.setPreferredSize(new Dimension(0, SECTION_HEIGHT));
+            rowsPanel.add(sshHeader);
+            for (Site s : sshSites) {
+                Row row = new Row(s, true);
+                rows.add(row);
+                rowsPanel.add(row);
+            }
         }
 
         JScrollPane scroll = new JScrollPane(rowsPanel);
@@ -336,8 +365,11 @@ public final class SessionsHome extends JPanel {
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        int total = sites.size() + sshSites.size();
         scroll.setPreferredSize(new Dimension(CARD_WIDTH,
-                Math.min(sites.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT));
+                Math.min(total, MAX_VISIBLE_ROWS) * ROW_HEIGHT
+                        + (sshSites.isEmpty() ? 0 : SECTION_HEIGHT)));
+        scroll.getVerticalScrollBar().setUnitIncrement(ROW_HEIGHT / 2);
 
         // The rows run edge to edge inside the card: no insets of any side,
         // only the divider under the search well. The row tint therefore
@@ -390,6 +422,8 @@ public final class SessionsHome extends JPanel {
     private final class Row extends JPanel {
 
         private final Site site;
+        /** Listed live from ~/.ssh/config, not saved in sessions.json. */
+        private final boolean fromSshConfig;
         private final JLabel glyphLabel;
         private final JLabel nameLabel;
         private final JLabel secondaryLabel;
@@ -399,8 +433,9 @@ public final class SessionsHome extends JPanel {
         private boolean hover;
         private boolean busy;
 
-        private Row(Site site) {
+        private Row(Site site, boolean fromSshConfig) {
             this.site = site;
+            this.fromSshConfig = fromSshConfig;
             // BorderLayout on purpose: EAST (age + ⋯) always gets its
             // preferred width and CENTER clips long text — a BoxLayout row
             // lets long names push the ⋯ button out of the viewport. SOUTH
@@ -427,7 +462,7 @@ public final class SessionsHome extends JPanel {
             secondaryLabel.setFont(FontRegistry.mono(12));
             secondaryLabel.setForeground(muted());
             secondaryLabel.setAlignmentX(LEFT_ALIGNMENT);
-            ageLabel = new JLabel(Fmt.age(site.lastUsed()));
+            ageLabel = new JLabel(fromSshConfig ? "ssh config" : Fmt.age(site.lastUsed()));
             ageLabel.setFont(FontRegistry.ui(11));
             ageLabel.setForeground(muted());
 
@@ -644,6 +679,15 @@ public final class SessionsHome extends JPanel {
             deleteItem.addActionListener(e -> delete());
             menu.add(connectItem);
             menu.addSeparator();
+            if (fromSshConfig) {
+                // Not ours to edit or delete: saving makes it a session.
+                JMenuItem saveItem = new JMenuItem("Save as Session…", Glyphs.icon(Glyphs.PLUS,
+                        Tokens.ICON_SMALL, SessionsHome::muted));
+                saveItem.addActionListener(e -> edit());
+                menu.add(saveItem);
+                menu.show(at, x, y);
+                return;
+            }
             menu.add(editItem);
             menu.add(deleteItem);
             menu.show(at, x, y);
@@ -690,6 +734,11 @@ public final class SessionsHome extends JPanel {
                     || s.user().toLowerCase().contains(q);
             row.setVisible(match);
             if (match) visible++;
+        }
+        if (sshHeader != null) {
+            boolean anySsh = false;
+            for (Row row : rows) anySsh |= row.fromSshConfig && row.isVisible();
+            sshHeader.setVisible(anySsh);
         }
         noMatchLabel.setVisible(visible == 0);
         rowsPanel.revalidate();
@@ -757,6 +806,16 @@ public final class SessionsHome extends JPanel {
     /** The tinted panel behind the search field (pixel checks sample this). */
     public JComponent searchChromeForTest() {
         return searchField != null ? (JComponent) searchField.getParent() : null;
+    }
+
+    /** True while the ~/.ssh/config caption shows (tests). */
+    public boolean sshSectionShownForTest() {
+        return sshHeader != null && sshHeader.isVisible();
+    }
+
+    /** True when row {@code i} is listed live from ~/.ssh/config (tests). */
+    public boolean fromSshConfigForTest(int i) {
+        return rows.get(i).fromSshConfig;
     }
 
     public void setSearchTextForTest(String text) {

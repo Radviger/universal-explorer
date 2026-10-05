@@ -125,6 +125,11 @@ public final class MainWindow extends JFrame {
             @Override public void localShell() { MainWindow.this.openLocalShell(); }
             @Override public void quickConnect(String typed) { MainWindow.this.quickConnect(typed); }
             @Override public void editSite(dock.core.config.Site site) { MainWindow.this.editSite(site); }
+            @Override public java.util.List<dock.core.config.Site> sshConfigSites() {
+                if (!dock.core.config.AppSettings.sshConfigHosts()) return java.util.List.of();
+                return dock.core.config.SshConfig.load().stream()
+                        .map(dock.core.config.SshConfig.Host::toSite).toList();
+            }
         });
         return homeView;
     }
@@ -427,6 +432,10 @@ public final class MainWindow extends JFrame {
         session.setMnemonic(KeyEvent.VK_S);
         session.add(item("New Session…", Glyphs.PLUS, "ctrl N", this::newSession));
         session.add(savedSessionsMenu());
+        session.addSeparator();
+        session.add(item("Import from SSH Config…", Glyphs.SERVER, null, this::importSshConfig));
+        session.add(sshConfigHostsItem());
+        session.addSeparator();
         session.add(item("Open Terminal…", Glyphs.TERMINAL, "ctrl shift T", this::openTerminal));
         session.add(item("Local Shell", Glyphs.TERMINAL, "ctrl shift L", this::openLocalShell));
         session.addSeparator();
@@ -493,6 +502,39 @@ public final class MainWindow extends JFrame {
         explorerMode.setEnabled(isSession);
         if (isSession) {
             explorerMode.setState(((SessionTab) tabs.getSelectedComponent()).explorerMode());
+        }
+    }
+
+    /** Auto mode: list every ~/.ssh/config host on the launcher, live. */
+    private JCheckBoxMenuItem sshConfigHostsItem() {
+        JCheckBoxMenuItem mi = checkItem("Show SSH Config Hosts", Glyphs.EYE, null);
+        mi.setState(dock.core.config.AppSettings.sshConfigHosts());
+        mi.addActionListener(e -> {
+            try {
+                dock.core.config.AppSettings.setFlag(
+                        dock.core.config.AppSettings.SSH_CONFIG_HOSTS, mi.getState());
+            } catch (java.io.IOException ex) {
+                Toast.show(this, "Could not save the setting: " + ex.getMessage(),
+                        Glyphs.WARNING);
+            }
+            if (homeView != null) homeView.refresh();
+        });
+        return mi;
+    }
+
+    /** Manual mode: pick ~/.ssh/config hosts to save as sessions. */
+    private void importSshConfig() {
+        java.util.List<dock.core.config.Site> hosts = dock.core.config.SshConfig.load().stream()
+                .map(dock.core.config.SshConfig.Host::toSite).toList();
+        if (hosts.isEmpty()) {
+            Toast.show(this, "No hosts found in ~/.ssh/config.", Glyphs.INFO);
+            return;
+        }
+        int imported = new SshImportDialog(this, hosts).showAndImport();
+        if (imported > 0) {
+            if (homeView != null) homeView.refresh();
+            Toast.show(this, "Imported " + imported + (imported == 1 ? " session." : " sessions."),
+                    Glyphs.INFO);
         }
     }
 
