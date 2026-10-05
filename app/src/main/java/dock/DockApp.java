@@ -8,7 +8,7 @@ import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
-/** Universal Explorer — a fast multi-protocol file client for Windows. */
+/** Universal Explorer — a fast multi-protocol file client. */
 public final class DockApp {
 
     private DockApp() {}

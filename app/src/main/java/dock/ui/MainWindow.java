@@ -580,7 +580,7 @@ public final class MainWindow extends JFrame {
         JLabel title = new JLabel(version == null ? "Universal Explorer"
                 : "Universal Explorer " + version);
         title.setFont(FontRegistry.uiSemiBold(16));
-        JLabel body = new JLabel("A fast multi-protocol file client for Windows.");
+        JLabel body = new JLabel("A fast multi-protocol file client.");
         body.setFont(FontRegistry.ui());
         body.setForeground(UIManager.getColor("Label.disabledForeground"));
         JLabel stack = new JLabel("Java " + Runtime.version().feature()
