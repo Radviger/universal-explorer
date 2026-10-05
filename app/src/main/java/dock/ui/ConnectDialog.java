@@ -94,7 +94,10 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     private JLabel agentHint;
     private final JCheckBox saveSession = new JCheckBox("Save session");
     private final JLabel errorLabel = new JLabel();
+    private static final Color ERROR_RED = new Color(0xE5484D);
+    private static final Color SUCCESS_GREEN = new Color(0x30A46C);
     private final JButton connectButton = new JButton("Connect");
+    private final JButton testButton = new JButton("Test Connection");
     private String idleText = "Connect";
     private String busyText = "Connecting…";
 
@@ -264,7 +267,7 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
             shareLabel.setVisible(false);
         }
 
-        errorLabel.setForeground(new Color(0xE5484D));
+        errorLabel.setForeground(ERROR_RED);
         errorLabel.setFont(FontRegistry.ui());
         errorLabel.setVisible(false);
         gc.gridx = 0; gc.gridy = row; gc.gridwidth = 3; gc.fill = GridBagConstraints.HORIZONTAL;
@@ -376,8 +379,11 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
             if (onSave != null) save();
             else connect();
         });
+        testButton.addActionListener(e -> testConnection());
         JButton cancel = new JButton("Cancel");
         cancel.addActionListener(e -> dispose());
+        buttons.add(testButton);
+        buttons.add(Box.createHorizontalStrut(Tokens.GAP_2));
         buttons.add(cancel);
         buttons.add(Box.createHorizontalStrut(Tokens.GAP_2));
         buttons.add(connectButton);
@@ -415,13 +421,22 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
         return null;
     }
 
-    private void connect() {
-        String problem = formProblem();
-        if (problem != null) {
-            error(problem);
-            return;
+    /** The form as a dial: the site and the secrets it reads. The arrays
+     *  are the caller's to wipe once the dial returns. */
+    private record FormDial(Protocol protocol, AuthMode mode, Site site,
+                            char[] password, char[] passphrase) {
+        dock.core.session.Session dial() throws Exception {
+            return Backends.of(protocol).dial(site, target ->
+                    target.endsWith("/key") ? passphrase : password);
         }
-        Protocol p = protocol();
+
+        void wipe() {
+            if (password != null) java.util.Arrays.fill(password, ' ');
+            if (passphrase != null) java.util.Arrays.fill(passphrase, ' ');
+        }
+    }
+
+    private FormDial formDial() {
         AuthMode mode = selectedMode();
         String host = hostField.getText().trim();
         // Only password mode reads the password field; the grabbed arrays
@@ -433,14 +448,57 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
         String name = nameField.getText().isBlank()
                 ? fragment.defaultName(user, host)
                 : nameField.getText().trim();
-        Site site = fragment.siteFromForm(name, mode, this);
+        return new FormDial(protocol(), mode, fragment.siteFromForm(name, mode, this),
+                password, passphrase);
+    }
+
+    /** Dials with the form as it stands and hangs up at once: the verdict
+     *  lands in the form, which stays open either way. Nothing is saved. */
+    private void testConnection() {
+        String problem = formProblem();
+        if (problem != null) {
+            error(problem);
+            return;
+        }
+        FormDial dial = formDial();
+        setBusy(true);
+        connectButton.setText(idleText);
+        testButton.setText("Testing…");
+        Thread.ofVirtual().name("dock-test-connect").start(() -> {
+            String failure = null;
+            try {
+                dial.dial().close();
+            } catch (Exception ex) {
+                failure = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+            } finally {
+                dial.wipe();
+            }
+            final String verdict = failure;
+            SwingUtilities.invokeLater(() -> {
+                setBusy(false);
+                testButton.setText("Test Connection");
+                if (verdict == null) success("Connection works.");
+                else error(verdict);
+            });
+        });
+    }
+
+    private void connect() {
+        String problem = formProblem();
+        if (problem != null) {
+            error(problem);
+            return;
+        }
+        FormDial dial = formDial();
+        AuthMode mode = dial.mode();
+        Site site = dial.site();
+        char[] password = dial.password();
+        char[] passphrase = dial.passphrase();
 
         setBusy(true);
         Thread.ofVirtual().name("dock-connect").start(() -> {
             try {
-                dock.core.session.Session session =
-                        Backends.of(p).dial(site, target ->
-                                target.endsWith("/key") ? passphrase : password);
+                dock.core.session.Session session = dial.dial();
                 Site saved = site;
                 if (saveSession.isVisible() && saveSession.isSelected()) {
                     try {
@@ -463,8 +521,7 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
                     error(ex.getMessage() == null ? ex.toString() : ex.getMessage());
                 });
             } finally {
-                if (password != null) java.util.Arrays.fill(password, ' ');
-                if (passphrase != null) java.util.Arrays.fill(passphrase, ' ');
+                dial.wipe();
             }
         });
     }
@@ -604,6 +661,7 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     private void setBusy(boolean b) {
         connectButton.setEnabled(!b);
         connectButton.setText(b ? busyText : idleText);
+        testButton.setEnabled(!b);
         hostField.setEnabled(!b);
         portField.setEnabled(!b);
         protocolCombo.setEnabled(!b);
@@ -613,6 +671,15 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     }
 
     private void error(String message) {
+        errorLabel.setForeground(ERROR_RED);
+        errorLabel.setText(message);
+        errorLabel.setVisible(true);
+        pack();
+    }
+
+    /** A good verdict in the same slot the errors use. */
+    private void success(String message) {
+        errorLabel.setForeground(SUCCESS_GREEN);
         errorLabel.setText(message);
         errorLabel.setVisible(true);
         pack();
@@ -715,6 +782,19 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     /** The dialog's primary button — "Connect" to dial, "Save" to edit. */
     public JButton primaryButtonForTest() {
         return connectButton;
+    }
+
+    public JButton testButtonForTest() {
+        return testButton;
+    }
+
+    public void setPasswordForTest(String text) {
+        passwordField.setText(text);
+    }
+
+    /** The verdict line's text while it shows, else null (tests). */
+    public String statusForTest() {
+        return errorLabel.isVisible() ? errorLabel.getText() : null;
     }
 
     public void setNameForTest(String text) {
