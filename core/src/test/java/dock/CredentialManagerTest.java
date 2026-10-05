@@ -6,12 +6,12 @@ import dock.core.secrets.CredentialManager;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
-/** Proves the hand-rolled JNA CREDENTIAL mapping really round-trips. */
+/** Proves the OS store binding (Credential Manager, Keychain) really round-trips. */
 class CredentialManagerTest {
 
     @Test
     void savesLoadsDeletes() {
-        Assumptions.assumeTrue(CredentialManager.available(), "Windows only");
+        Assumptions.assumeTrue(CredentialManager.available(), "no OS credential store");
         String target = "Dock/selftest";
         try {
             CredentialManager.save(target, "s3cret-passphrase");
@@ -29,13 +29,13 @@ class CredentialManagerTest {
 
     @Test
     void missingEntryLoadsNull() {
-        Assumptions.assumeTrue(CredentialManager.available(), "Windows only");
+        Assumptions.assumeTrue(CredentialManager.available(), "no OS credential store");
         assertNull(CredentialManager.load("Dock/definitely-not-stored-xyz"));
     }
 
     @Test
     void legacyDockTargetsLoadAndCopyForward() {
-        Assumptions.assumeTrue(CredentialManager.available(), "Windows only");
+        Assumptions.assumeTrue(CredentialManager.available(), "no OS credential store");
         String legacy = "Dock/renamed-selftest";
         String current = "Universal Explorer/renamed-selftest";
         try {
@@ -52,7 +52,7 @@ class CredentialManagerTest {
 
     @Test
     void deletingATargetPurgesItsLegacyTwin() {
-        Assumptions.assumeTrue(CredentialManager.available(), "Windows only");
+        Assumptions.assumeTrue(CredentialManager.available(), "no OS credential store");
         try {
             CredentialManager.save("Dock/twin-selftest", "stale");
             CredentialManager.delete("Universal Explorer/twin-selftest");
