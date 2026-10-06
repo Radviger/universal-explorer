@@ -17,10 +17,10 @@ public final class AppSettings {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** Show the hosts of ~/.ssh/config on the launcher, live (on by default). */
+    /** Show the hosts of ~/.ssh/config on the launcher, live (off by default). */
     public static final String SSH_CONFIG_HOSTS = "sshConfigHosts";
 
-    /** Show the profiles of ~/.aws on the launcher, live (on by default). */
+    /** Show the profiles of ~/.aws on the launcher, live (off by default). */
     public static final String AWS_PROFILES = "awsProfiles";
 
     private AppSettings() {}

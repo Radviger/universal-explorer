@@ -22,6 +22,11 @@ import javax.swing.UIManager;
 public final class EmptyState extends JPanel {
 
     public EmptyState(Runnable newSessionAction) {
+        this(newSessionAction, null, null);
+    }
+
+    /** With a secondary, link-style action under the hint (null for none). */
+    public EmptyState(Runnable newSessionAction, String extraText, Runnable extraAction) {
         setLayout(new GridBagLayout());
 
         CardPanel card = new CardPanel(new GridBagLayout());
@@ -43,6 +48,16 @@ public final class EmptyState extends JPanel {
         col.add(primaryButton("New session", Glyphs.PLUS, newSessionAction));
         col.add(Box.createVerticalStrut(Tokens.GAP_3));
         col.add(hint("or press Ctrl+N"));
+        if (extraText != null && extraAction != null) {
+            col.add(Box.createVerticalStrut(Tokens.GAP_4));
+            JButton extra = new JButton(extraText, Glyphs.icon(Glyphs.EYE, Tokens.ICON_SMALL,
+                    EmptyState::muted));
+            extra.putClientProperty("JButton.buttonType", "borderless");
+            extra.setFont(FontRegistry.ui());
+            extra.setAlignmentX(CENTER_ALIGNMENT);
+            extra.addActionListener(e -> extraAction.run());
+            col.add(extra);
+        }
 
         card.add(col);
         add(card);

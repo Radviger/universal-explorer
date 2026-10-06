@@ -138,6 +138,56 @@ class SourceSectionsLauncherTest {
         assertTrue(bounds.get().width > 500, "and spans the card: " + bounds.get());
     }
 
+    /** A launcher whose sources have entries; the toggle drives {@code shown}. */
+    private static SessionsHome toggleHome(java.util.concurrent.atomic.AtomicBoolean shown)
+            throws Exception {
+        var host = new SessionsHome.Host() {
+            @Override public void connect(Site site,
+                    BiConsumer<Exception, dock.core.fs.FileSystem> outcome) {}
+            @Override public void newSession() {}
+            @Override public void localShell() {}
+            @Override public void quickConnect(String typed) {}
+            @Override public void editSite(Site site) {}
+            @Override public boolean hasSourceEntries() { return true; }
+            @Override public boolean sourcesShown() { return shown.get(); }
+            @Override public void setSourcesShown(boolean b) { shown.set(b); }
+            @Override public List<SessionsHome.Section> sourceSections() {
+                return shown.get() ? List.of(ssh(prod())) : List.of();
+            }
+        };
+        var out = new AtomicReference<SessionsHome>();
+        SwingUtilities.invokeAndWait(() -> out.set(new SessionsHome(host)));
+        return out.get();
+    }
+
+    @Test
+    void theConfigsToggleShowsAndHidesTheSources() throws Exception {
+        saved("""
+                [{"name":"mine","host":"a.example","port":22,"user":"u","keyPath":null,"lastUsed":1}]""");
+        var shown = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var h = toggleHome(shown);
+        assertEquals(1, h.rowCount(), "hidden: the launcher looks as it always did");
+        assertEquals("Show Configs", h.sourcesToggleForTest().getText());
+
+        SwingUtilities.invokeAndWait(() -> h.sourcesToggleForTest().doClick());
+        assertTrue(shown.get());
+        assertEquals(2, h.rowCount());
+        assertTrue(h.sectionShownForTest(SSH));
+        assertEquals("Hide Configs", h.sourcesToggleForTest().getText());
+
+        SwingUtilities.invokeAndWait(() -> h.sourcesToggleForTest().doClick());
+        assertFalse(shown.get());
+        assertEquals(1, h.rowCount());
+    }
+
+    @Test
+    void withoutSourceEntriesThereIsNoToggle() throws Exception {
+        saved("""
+                [{"name":"mine","host":"a.example","port":22,"user":"u","keyPath":null,"lastUsed":1}]""");
+        var h = home();
+        assertEquals(null, h.sourcesToggleForTest());
+    }
+
     @Test
     void aSourceRowShowsItsSourceInPlaceOfAnAge() throws Exception {
         var h = home(ssh(prod()));

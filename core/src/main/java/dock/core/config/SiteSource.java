@@ -30,8 +30,8 @@ public interface SiteSource {
         return List.of(SshConfig.SOURCE, AwsProfiles.SOURCE);
     }
 
-    /** Whether the launcher lists this source (on unless switched off). */
+    /** Whether the launcher lists this source (off until switched on). */
     default boolean shown() {
-        return AppSettings.flag(settingKey(), true);
+        return AppSettings.flag(settingKey(), false);
     }
 }

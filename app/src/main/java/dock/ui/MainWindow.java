@@ -125,6 +125,28 @@ public final class MainWindow extends JFrame {
             @Override public void localShell() { MainWindow.this.openLocalShell(); }
             @Override public void quickConnect(String typed) { MainWindow.this.quickConnect(typed); }
             @Override public void editSite(dock.core.config.Site site) { MainWindow.this.editSite(site); }
+            @Override public boolean hasSourceEntries() {
+                for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
+                    if (!src.sites().isEmpty()) return true;
+                }
+                return false;
+            }
+            @Override public boolean sourcesShown() {
+                for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
+                    if (src.shown()) return true;
+                }
+                return false;
+            }
+            @Override public void setSourcesShown(boolean shown) {
+                try {
+                    for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
+                        dock.core.config.AppSettings.setFlag(src.settingKey(), shown);
+                    }
+                } catch (java.io.IOException ex) {
+                    Toast.show(MainWindow.this, "Could not save the setting: " + ex.getMessage(),
+                            Glyphs.WARNING);
+                }
+            }
             @Override public java.util.List<SessionsHome.Section> sourceSections() {
                 java.util.List<SessionsHome.Section> out = new java.util.ArrayList<>();
                 for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
@@ -437,11 +459,23 @@ public final class MainWindow extends JFrame {
         session.add(item("New Session…", Glyphs.PLUS, "ctrl N", this::newSession));
         session.add(savedSessionsMenu());
         session.addSeparator();
+        java.util.Map<JCheckBoxMenuItem, dock.core.config.SiteSource> shownItems =
+                new java.util.LinkedHashMap<>();
         for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
             session.add(item("Import " + src.menuName() + "…", Glyphs.SERVER, null,
                     () -> importFrom(src)));
-            session.add(sourceShownItem(src));
+            JCheckBoxMenuItem shown = sourceShownItem(src);
+            shownItems.put(shown, src);
+            session.add(shown);
         }
+        // The launcher's Configs toggle flips the same flags: re-read on open.
+        session.addMenuListener(new javax.swing.event.MenuListener() {
+            @Override public void menuSelected(javax.swing.event.MenuEvent e) {
+                shownItems.forEach((mi, src) -> mi.setState(src.shown()));
+            }
+            @Override public void menuDeselected(javax.swing.event.MenuEvent e) {}
+            @Override public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
         session.addSeparator();
         session.add(item("Open Terminal…", Glyphs.TERMINAL, "ctrl shift T", this::openTerminal));
         session.add(item("Local Shell", Glyphs.TERMINAL, "ctrl shift L", this::openLocalShell));

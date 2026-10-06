@@ -20,14 +20,15 @@ class AppSettingsTest {
     @AfterEach void release() { AppPaths.override(null); }
 
     @Test
-    void sshConfigHostsAreShownByDefault() {
-        assertTrue(SshConfig.SOURCE.shown());
+    void sourcesStayHiddenUntilShown() {
+        assertFalse(SshConfig.SOURCE.shown());
+        assertFalse(AwsProfiles.SOURCE.shown());
     }
 
     @Test
     void aFlagSurvivesARead() throws Exception {
-        AppSettings.setFlag(AppSettings.SSH_CONFIG_HOSTS, false);
-        assertFalse(SshConfig.SOURCE.shown());
+        AppSettings.setFlag(AppSettings.SSH_CONFIG_HOSTS, true);
+        assertTrue(SshConfig.SOURCE.shown());
     }
 
     @Test
@@ -41,5 +42,6 @@ class AppSettingsTest {
     void anUnreadableFileReadsAsDefaults() throws Exception {
         Files.writeString(dir.resolve("settings.json"), "not json");
         assertEquals(true, AppSettings.flag(AppSettings.SSH_CONFIG_HOSTS, true));
+        assertFalse(SshConfig.SOURCE.shown());
     }
 }

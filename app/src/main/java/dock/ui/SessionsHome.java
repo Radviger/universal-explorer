@@ -84,6 +84,16 @@ public final class SessionsHome extends JPanel {
          *  below the saved sessions, one section per shown source, read
          *  fresh on every refresh. */
         default List<Section> sourceSections() { return List.of(); }
+
+        /** True when some source has entries to show at all — the
+         *  Configs toggle only appears then. */
+        default boolean hasSourceEntries() { return false; }
+
+        /** Whether the sources are listed (the Configs toggle's state). */
+        default boolean sourcesShown() { return false; }
+
+        /** Lists or hides every source; the launcher refreshes itself after. */
+        default void setSourcesShown(boolean shown) { }
     }
 
     /** One external source's rows: its caption, the tag its rows show in
@@ -106,6 +116,8 @@ public final class SessionsHome extends JPanel {
     private final List<Row> rows = new ArrayList<>();
     private JTextField searchField;
     private JLabel noMatchLabel;
+    /** The footer's Show/Hide Configs toggle; null while no source has entries. */
+    private JButton sourcesToggle;
     private JPanel rowsPanel;
     /** Each external source's caption, by title. */
     private final java.util.Map<String, JLabel> sectionHeaders = new java.util.LinkedHashMap<>();
@@ -132,7 +144,10 @@ public final class SessionsHome extends JPanel {
             if (!fresh.isEmpty()) sections.add(new Section(sec.title(), sec.tag(), fresh));
         }
         if (sites.isEmpty() && sections.isEmpty()) {
-            add(new EmptyState(host::newSession));
+            add(host.hasSourceEntries() && !host.sourcesShown()
+                    ? new EmptyState(host::newSession, "Show hosts from ~/.ssh and ~/.aws",
+                            () -> toggleSources(true))
+                    : new EmptyState(host::newSession));
         } else {
             add(buildLauncher(sites, sections));
         }
@@ -407,7 +422,7 @@ public final class SessionsHome extends JPanel {
                         UIManager.getColor("Component.borderColor")),
                 BorderFactory.createEmptyBorder(Tokens.GAP_2, Tokens.GAP_3, Tokens.GAP_2, Tokens.GAP_3)));
 
-        JLabel hint = new JLabel("Ctrl+K to search  ·  ↑ ↓ to browse  ·  Enter to connect");
+        JLabel hint = new JLabel("Ctrl+K search  ·  ↑ ↓ browse  ·  Enter connect");
         hint.setFont(FontRegistry.uiMedium(11));
         hint.setForeground(muted());
 
@@ -425,6 +440,19 @@ public final class SessionsHome extends JPanel {
         JPanel actions = new JPanel();
         actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
         actions.setOpaque(false);
+        sourcesToggle = null;
+        if (host.hasSourceEntries()) {
+            boolean shown = host.sourcesShown();
+            sourcesToggle = new JButton(shown ? "Hide Configs" : "Show Configs",
+                    Glyphs.icon(Glyphs.EYE, Tokens.ICON_SMALL,
+                            () -> UIManager.getColor("Label.foreground")));
+            statusHint(sourcesToggle, (shown ? "Hide" : "Show")
+                    + " the hosts of ~/.ssh/config and the profiles of ~/.aws");
+            sourcesToggle.putClientProperty("FlatLaf.style", "arc: " + Tokens.ARC + ";");
+            sourcesToggle.addActionListener(e -> toggleSources(!shown));
+            actions.add(sourcesToggle);
+            actions.add(Box.createHorizontalStrut(Tokens.GAP_2));
+        }
         actions.add(local);
         actions.add(Box.createHorizontalStrut(Tokens.GAP_2));
         actions.add(fresh);
@@ -432,6 +460,11 @@ public final class SessionsHome extends JPanel {
         footer.add(hint, BorderLayout.WEST);
         footer.add(actions, BorderLayout.EAST);
         return footer;
+    }
+
+    private void toggleSources(boolean shown) {
+        host.setSourcesShown(shown);
+        refresh();
     }
 
     // ---- rows ----
@@ -839,6 +872,11 @@ public final class SessionsHome extends JPanel {
         rowsPanel.setSize(CARD_WIDTH, rowsPanel.getPreferredSize().height);
         rowsPanel.doLayout();
         return sectionHeaders.get(title).getBounds();
+    }
+
+    /** The footer's Show/Hide Configs toggle, or null (tests). */
+    public JButton sourcesToggleForTest() {
+        return sourcesToggle;
     }
 
     /** True when row {@code i} is listed live from an external source (tests). */
