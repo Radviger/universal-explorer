@@ -125,10 +125,14 @@ public final class MainWindow extends JFrame {
             @Override public void localShell() { MainWindow.this.openLocalShell(); }
             @Override public void quickConnect(String typed) { MainWindow.this.quickConnect(typed); }
             @Override public void editSite(dock.core.config.Site site) { MainWindow.this.editSite(site); }
-            @Override public java.util.List<dock.core.config.Site> sshConfigSites() {
-                if (!dock.core.config.AppSettings.sshConfigHosts()) return java.util.List.of();
-                return dock.core.config.SshConfig.load().stream()
-                        .map(dock.core.config.SshConfig.Host::toSite).toList();
+            @Override public java.util.List<SessionsHome.Section> sourceSections() {
+                java.util.List<SessionsHome.Section> out = new java.util.ArrayList<>();
+                for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
+                    if (src.shown()) {
+                        out.add(new SessionsHome.Section(src.title(), src.tag(), src.sites()));
+                    }
+                }
+                return out;
             }
         });
         return homeView;
@@ -433,8 +437,11 @@ public final class MainWindow extends JFrame {
         session.add(item("New Session…", Glyphs.PLUS, "ctrl N", this::newSession));
         session.add(savedSessionsMenu());
         session.addSeparator();
-        session.add(item("Import from SSH Config…", Glyphs.SERVER, null, this::importSshConfig));
-        session.add(sshConfigHostsItem());
+        for (dock.core.config.SiteSource src : dock.core.config.SiteSource.all()) {
+            session.add(item("Import " + src.menuName() + "…", Glyphs.SERVER, null,
+                    () -> importFrom(src)));
+            session.add(sourceShownItem(src));
+        }
         session.addSeparator();
         session.add(item("Open Terminal…", Glyphs.TERMINAL, "ctrl shift T", this::openTerminal));
         session.add(item("Local Shell", Glyphs.TERMINAL, "ctrl shift L", this::openLocalShell));
@@ -505,14 +512,13 @@ public final class MainWindow extends JFrame {
         }
     }
 
-    /** Auto mode: list every ~/.ssh/config host on the launcher, live. */
-    private JCheckBoxMenuItem sshConfigHostsItem() {
-        JCheckBoxMenuItem mi = checkItem("Show SSH Config Hosts", Glyphs.EYE, null);
-        mi.setState(dock.core.config.AppSettings.sshConfigHosts());
+    /** Auto mode: list a source's entries on the launcher, live. */
+    private JCheckBoxMenuItem sourceShownItem(dock.core.config.SiteSource src) {
+        JCheckBoxMenuItem mi = checkItem("Show " + src.menuName(), Glyphs.EYE, null);
+        mi.setState(src.shown());
         mi.addActionListener(e -> {
             try {
-                dock.core.config.AppSettings.setFlag(
-                        dock.core.config.AppSettings.SSH_CONFIG_HOSTS, mi.getState());
+                dock.core.config.AppSettings.setFlag(src.settingKey(), mi.getState());
             } catch (java.io.IOException ex) {
                 Toast.show(this, "Could not save the setting: " + ex.getMessage(),
                         Glyphs.WARNING);
@@ -522,15 +528,16 @@ public final class MainWindow extends JFrame {
         return mi;
     }
 
-    /** Manual mode: pick ~/.ssh/config hosts to save as sessions. */
-    private void importSshConfig() {
-        java.util.List<dock.core.config.Site> hosts = dock.core.config.SshConfig.load().stream()
-                .map(dock.core.config.SshConfig.Host::toSite).toList();
+    /** Manual mode: pick a source's entries to save as sessions. */
+    private void importFrom(dock.core.config.SiteSource src) {
+        java.util.List<dock.core.config.Site> hosts = src.sites();
         if (hosts.isEmpty()) {
-            Toast.show(this, "No hosts found in ~/.ssh/config.", Glyphs.INFO);
+            Toast.show(this, "Nothing to import: " + src.title().replace("From ", "")
+                    + " lists no usable entries.", Glyphs.INFO);
             return;
         }
-        int imported = new SshImportDialog(this, hosts).showAndImport();
+        int imported = new SourceImportDialog(this, "Import " + src.menuName(), hosts)
+                .showAndImport();
         if (imported > 0) {
             if (homeView != null) homeView.refresh();
             Toast.show(this, "Imported " + imported + (imported == 1 ? " session." : " sessions."),

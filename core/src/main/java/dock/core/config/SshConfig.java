@@ -61,6 +61,17 @@ public final class SshConfig {
         }
     }
 
+    /** ~/.ssh/config as a launcher source: every host as an SFTP site. */
+    public static final SiteSource SOURCE = new SiteSource() {
+        @Override public String title() { return "From ~/.ssh/config"; }
+        @Override public String menuName() { return "SSH Config Hosts"; }
+        @Override public String tag() { return "ssh config"; }
+        @Override public String settingKey() { return AppSettings.SSH_CONFIG_HOSTS; }
+        @Override public List<Site> sites() {
+            return load().stream().map(Host::toSite).toList();
+        }
+    };
+
     /** OpenSSH's default identities, in its own try order. */
     static final List<String> DEFAULT_KEYS = List.of("id_ed25519", "id_ecdsa", "id_rsa");
 

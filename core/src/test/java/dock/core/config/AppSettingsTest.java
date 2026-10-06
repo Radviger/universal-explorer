@@ -21,13 +21,13 @@ class AppSettingsTest {
 
     @Test
     void sshConfigHostsAreShownByDefault() {
-        assertTrue(AppSettings.sshConfigHosts());
+        assertTrue(SshConfig.SOURCE.shown());
     }
 
     @Test
     void aFlagSurvivesARead() throws Exception {
         AppSettings.setFlag(AppSettings.SSH_CONFIG_HOSTS, false);
-        assertFalse(AppSettings.sshConfigHosts());
+        assertFalse(SshConfig.SOURCE.shown());
     }
 
     @Test

@@ -26,19 +26,19 @@ import javax.swing.JScrollPane;
 import javax.swing.UIManager;
 
 /**
- * The manual mode of the ~/.ssh/config bridge: every host as a checkbox,
- * the checked ones saved as ordinary sessions — editable, deletable, with
- * path memory, independent of the file from then on. Hosts a saved session
- * already names are listed but locked.
+ * The manual mode of an external source (~/.ssh/config, ~/.aws): every
+ * entry as a checkbox, the checked ones saved as ordinary sessions —
+ * editable, deletable, with path memory, independent of the source from
+ * then on. Entries a saved session already names are listed but locked.
  */
-final class SshImportDialog extends JDialog {
+final class SourceImportDialog extends JDialog {
 
     private final List<Site> hosts;
     private final List<JCheckBox> boxes = new ArrayList<>();
     private int imported;
 
-    SshImportDialog(Window owner, List<Site> hosts) {
-        super(owner, "Import from SSH Config", ModalityType.APPLICATION_MODAL);
+    SourceImportDialog(Window owner, String title, List<Site> hosts) {
+        super(owner, title, ModalityType.APPLICATION_MODAL);
         this.hosts = hosts;
         setLayout(new BorderLayout());
         add(buildBody(), BorderLayout.CENTER);
@@ -75,7 +75,7 @@ final class SshImportDialog extends JDialog {
             list.add(box);
         }
 
-        JLabel intro = new JLabel("Checked hosts become saved sessions.");
+        JLabel intro = new JLabel("Checked entries become saved sessions.");
         intro.setFont(FontRegistry.ui());
         intro.setBorder(BorderFactory.createEmptyBorder(0, 0, Tokens.GAP_2, 0));
 
@@ -142,7 +142,8 @@ final class SshImportDialog extends JDialog {
     }
 
     private static String endpoint(Site s) {
-        return s.user() + "@" + s.host() + (s.port() == 22 ? "" : ":" + s.port());
+        var backend = dock.core.spi.Backends.of(s.protocol());
+        return backend != null ? backend.secondaryText(s) : s.host();
     }
 
     private static String escape(String s) {

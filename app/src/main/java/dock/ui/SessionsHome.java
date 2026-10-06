@@ -80,10 +80,15 @@ public final class SessionsHome extends JPanel {
 
         void editSite(Site site);
 
-        /** The hosts of ~/.ssh/config to list beside the saved sessions,
-         *  read fresh on every refresh; empty when that mode is off. */
-        default List<Site> sshConfigSites() { return List.of(); }
+        /** Connections from outside the app (~/.ssh/config, ~/.aws) to list
+         *  below the saved sessions, one section per shown source, read
+         *  fresh on every refresh. */
+        default List<Section> sourceSections() { return List.of(); }
     }
+
+    /** One external source's rows: its caption, the tag its rows show in
+     *  place of an age, and its sites. */
+    public record Section(String title, String tag, List<Site> sites) {}
 
     private static final int CARD_WIDTH = 560;
     private static final int ROW_HEIGHT = 52;
@@ -102,8 +107,8 @@ public final class SessionsHome extends JPanel {
     private JTextField searchField;
     private JLabel noMatchLabel;
     private JPanel rowsPanel;
-    /** The ~/.ssh/config section's caption; null when that section is empty. */
-    private JLabel sshHeader;
+    /** Each external source's caption, by title. */
+    private final java.util.Map<String, JLabel> sectionHeaders = new java.util.LinkedHashMap<>();
 
     public SessionsHome(Host host) {
         this.host = host;
@@ -117,14 +122,19 @@ public final class SessionsHome extends JPanel {
         removeAll();
         rows.clear();
         List<Site> sites = Sites.byRecency(Sites.load());
-        java.util.Set<String> saved = new java.util.HashSet<>();
-        for (Site s : sites) saved.add(s.name());
-        List<Site> sshSites = host.sshConfigSites().stream()
-                .filter(s -> !saved.contains(s.name())).toList();
-        if (sites.isEmpty() && sshSites.isEmpty()) {
+        // A name already on screen wins: a saved session hides the source
+        // entry it was imported from, and an earlier source a later one.
+        java.util.Set<String> taken = new java.util.HashSet<>();
+        for (Site s : sites) taken.add(s.name());
+        List<Section> sections = new ArrayList<>();
+        for (Section sec : host.sourceSections()) {
+            List<Site> fresh = sec.sites().stream().filter(s -> taken.add(s.name())).toList();
+            if (!fresh.isEmpty()) sections.add(new Section(sec.title(), sec.tag(), fresh));
+        }
+        if (sites.isEmpty() && sections.isEmpty()) {
             add(new EmptyState(host::newSession));
         } else {
-            add(buildLauncher(sites, sshSites));
+            add(buildLauncher(sites, sections));
         }
         revalidate();
         repaint();
@@ -204,7 +214,7 @@ public final class SessionsHome extends JPanel {
 
     // ---- construction ----
 
-    private JComponent buildLauncher(List<Site> sites, List<Site> sshSites) {
+    private JComponent buildLauncher(List<Site> sites, List<Section> sections) {
         JPanel column = new JPanel();
         column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
         column.setOpaque(false);
@@ -217,18 +227,18 @@ public final class SessionsHome extends JPanel {
         column.add(Box.createVerticalStrut(Tokens.GAP_1));
         column.add(body("Click a session to connect"));
         column.add(Box.createVerticalStrut(Tokens.GAP_6));
-        column.add(new LauncherCard(sites, sshSites));
+        column.add(new LauncherCard(sites, sections));
         return column;
     }
 
     private final class LauncherCard extends CardPanel {
 
-        private LauncherCard(List<Site> sites, List<Site> sshSites) {
+        private LauncherCard(List<Site> sites, List<Section> sections) {
             super(new BorderLayout());
             setMaximumSize(new Dimension(CARD_WIDTH, Integer.MAX_VALUE));
 
             add(buildSearchArea(), BorderLayout.NORTH);
-            add(buildRowsArea(sites, sshSites), BorderLayout.CENTER);
+            add(buildRowsArea(sites, sections), BorderLayout.CENTER);
             add(buildFooter(), BorderLayout.SOUTH);
         }
 
@@ -315,7 +325,7 @@ public final class SessionsHome extends JPanel {
         return chrome;
     }
 
-    private JComponent buildRowsArea(List<Site> sites, List<Site> sshSites) {
+    private JComponent buildRowsArea(List<Site> sites, List<Section> sections) {
         // Preferred width must stay at zero: a wide preferred (e.g. from a
         // row's text) makes the scroll view report more than the viewport
         // width, and with the horizontal scrollbar off the excess clips off
@@ -338,25 +348,28 @@ public final class SessionsHome extends JPanel {
         rowsPanel.add(noMatchLabel);
 
         for (Site s : sites) {
-            Row row = new Row(s, false);
+            Row row = new Row(s, null);
             rows.add(row);
             rowsPanel.add(row);
         }
-        sshHeader = null;
-        if (!sshSites.isEmpty()) {
-            sshHeader = new JLabel("From ~/.ssh/config");
-            sshHeader.setFont(FontRegistry.uiMedium(11));
-            sshHeader.setForeground(muted());
-            sshHeader.setAlignmentX(LEFT_ALIGNMENT);
-            sshHeader.setBorder(BorderFactory.createEmptyBorder(Tokens.GAP_2, Tokens.GAP_3,
+        sectionHeaders.clear();
+        int sourceRows = 0;
+        for (Section sec : sections) {
+            JLabel header = new JLabel(sec.title());
+            header.setFont(FontRegistry.uiMedium(11));
+            header.setForeground(muted());
+            header.setAlignmentX(LEFT_ALIGNMENT);
+            header.setBorder(BorderFactory.createEmptyBorder(Tokens.GAP_2, Tokens.GAP_3,
                     Tokens.GAP_1, Tokens.GAP_3));
-            sshHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, SECTION_HEIGHT));
-            sshHeader.setPreferredSize(new Dimension(0, SECTION_HEIGHT));
-            rowsPanel.add(sshHeader);
-            for (Site s : sshSites) {
-                Row row = new Row(s, true);
+            header.setMaximumSize(new Dimension(Integer.MAX_VALUE, SECTION_HEIGHT));
+            header.setPreferredSize(new Dimension(0, SECTION_HEIGHT));
+            sectionHeaders.put(sec.title(), header);
+            rowsPanel.add(header);
+            for (Site s : sec.sites()) {
+                Row row = new Row(s, sec);
                 rows.add(row);
                 rowsPanel.add(row);
+                sourceRows++;
             }
         }
 
@@ -365,10 +378,10 @@ public final class SessionsHome extends JPanel {
         scroll.setOpaque(false);
         scroll.getViewport().setOpaque(false);
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        int total = sites.size() + sshSites.size();
+        int total = sites.size() + sourceRows;
         scroll.setPreferredSize(new Dimension(CARD_WIDTH,
                 Math.min(total, MAX_VISIBLE_ROWS) * ROW_HEIGHT
-                        + (sshSites.isEmpty() ? 0 : SECTION_HEIGHT)));
+                        + (sections.isEmpty() ? 0 : SECTION_HEIGHT)));
         scroll.getVerticalScrollBar().setUnitIncrement(ROW_HEIGHT / 2);
 
         // The rows run edge to edge inside the card: no insets of any side,
@@ -422,8 +435,8 @@ public final class SessionsHome extends JPanel {
     private final class Row extends JPanel {
 
         private final Site site;
-        /** Listed live from ~/.ssh/config, not saved in sessions.json. */
-        private final boolean fromSshConfig;
+        /** The external source listing this row live; null for a saved session. */
+        private final Section section;
         private final JLabel glyphLabel;
         private final JLabel nameLabel;
         private final JLabel secondaryLabel;
@@ -433,9 +446,9 @@ public final class SessionsHome extends JPanel {
         private boolean hover;
         private boolean busy;
 
-        private Row(Site site, boolean fromSshConfig) {
+        private Row(Site site, Section section) {
             this.site = site;
-            this.fromSshConfig = fromSshConfig;
+            this.section = section;
             // BorderLayout on purpose: EAST (age + ⋯) always gets its
             // preferred width and CENTER clips long text — a BoxLayout row
             // lets long names push the ⋯ button out of the viewport. SOUTH
@@ -462,7 +475,7 @@ public final class SessionsHome extends JPanel {
             secondaryLabel.setFont(FontRegistry.mono(12));
             secondaryLabel.setForeground(muted());
             secondaryLabel.setAlignmentX(LEFT_ALIGNMENT);
-            ageLabel = new JLabel(fromSshConfig ? "ssh config" : Fmt.age(site.lastUsed()));
+            ageLabel = new JLabel(section != null ? section.tag() : Fmt.age(site.lastUsed()));
             ageLabel.setFont(FontRegistry.ui(11));
             ageLabel.setForeground(muted());
 
@@ -679,7 +692,7 @@ public final class SessionsHome extends JPanel {
             deleteItem.addActionListener(e -> delete());
             menu.add(connectItem);
             menu.addSeparator();
-            if (fromSshConfig) {
+            if (section != null) {
                 // Not ours to edit or delete: saving makes it a session.
                 JMenuItem saveItem = new JMenuItem("Save as Session…", Glyphs.icon(Glyphs.PLUS,
                         Tokens.ICON_SMALL, SessionsHome::muted));
@@ -735,10 +748,13 @@ public final class SessionsHome extends JPanel {
             row.setVisible(match);
             if (match) visible++;
         }
-        if (sshHeader != null) {
-            boolean anySsh = false;
-            for (Row row : rows) anySsh |= row.fromSshConfig && row.isVisible();
-            sshHeader.setVisible(anySsh);
+        for (var e : sectionHeaders.entrySet()) {
+            boolean any = false;
+            for (Row row : rows) {
+                any |= row.section != null && row.section.title().equals(e.getKey())
+                        && row.isVisible();
+            }
+            e.getValue().setVisible(any);
         }
         noMatchLabel.setVisible(visible == 0);
         rowsPanel.revalidate();
@@ -808,14 +824,15 @@ public final class SessionsHome extends JPanel {
         return searchField != null ? (JComponent) searchField.getParent() : null;
     }
 
-    /** True while the ~/.ssh/config caption shows (tests). */
-    public boolean sshSectionShownForTest() {
-        return sshHeader != null && sshHeader.isVisible();
+    /** True while the caption of the source titled so shows (tests). */
+    public boolean sectionShownForTest(String title) {
+        JLabel header = sectionHeaders.get(title);
+        return header != null && header.isVisible();
     }
 
-    /** True when row {@code i} is listed live from ~/.ssh/config (tests). */
-    public boolean fromSshConfigForTest(int i) {
-        return rows.get(i).fromSshConfig;
+    /** True when row {@code i} is listed live from an external source (tests). */
+    public boolean fromSourceForTest(int i) {
+        return rows.get(i).section != null;
     }
 
     public void setSearchTextForTest(String text) {

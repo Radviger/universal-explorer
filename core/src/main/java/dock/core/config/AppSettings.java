@@ -20,6 +20,9 @@ public final class AppSettings {
     /** Show the hosts of ~/.ssh/config on the launcher, live (on by default). */
     public static final String SSH_CONFIG_HOSTS = "sshConfigHosts";
 
+    /** Show the profiles of ~/.aws on the launcher, live (on by default). */
+    public static final String AWS_PROFILES = "awsProfiles";
+
     private AppSettings() {}
 
     public static synchronized boolean flag(String key, boolean fallback) {
@@ -30,10 +33,6 @@ public final class AppSettings {
         Map<String, Object> all = load();
         all.put(key, value);
         JSON.writerWithDefaultPrettyPrinter().writeValue(file().toFile(), all);
-    }
-
-    public static boolean sshConfigHosts() {
-        return flag(SSH_CONFIG_HOSTS, true);
     }
 
     private static Map<String, Object> load() {
