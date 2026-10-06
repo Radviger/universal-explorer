@@ -200,3 +200,92 @@ tasks.register<JavaExec>("icon") {
     mainClass.set("dock.kit.AppIcon")
     args("build/icon")
 }
+
+/**
+ * A self-contained app for this OS in build/package (jpackage): its own
+ * Java runtime, the bundled LibVLC beside the jars (VlcRuntime finds it
+ * there), and the app icon. macOS gets "Universal Explorer.app", Windows
+ * and Linux their app-image folder. Unsigned — fine for the machine that
+ * built it.
+ */
+tasks.register("packageApp") {
+    group = "distribution"
+    description = "Builds a self-contained app for this OS into build/package."
+    dependsOn("jar", "downloadVlc", "icon")
+    val runtimeJars = configurations.named("runtimeClasspath")
+    val appJar = tasks.named<Jar>("jar").flatMap { it.archiveFile }
+    val jdk = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+            .map { it.metadata.installationPath.asFile }
+    doLast {
+        val out = File(layout.buildDirectory.asFile.get(), "package")
+        val input = File(out, "input")
+        out.deleteRecursively()
+        input.mkdirs()
+        fun run(vararg cmd: String) {
+            val p = ProcessBuilder(*cmd).redirectErrorStream(true).start()
+            val text = p.inputStream.bufferedReader().readText()
+            check(p.waitFor() == 0) { "${cmd.first()} failed:\n$text" }
+        }
+        // The app and every library side by side; jpackage puts --input on the class path.
+        appJar.get().asFile.copyTo(File(input, appJar.get().asFile.name))
+        runtimeJars.get().files.filter { it.name.endsWith(".jar") }
+                .forEach { it.copyTo(File(input, it.name), overwrite = true) }
+        val vlc = vlcDir.asFile
+        if (vlc.isDirectory) {
+            // ditto keeps the macOS dylib symlinks intact.
+            if (isMacHost) run("ditto", vlc.path, File(input, "vlc").path)
+            else vlc.copyRecursively(File(input, "vlc"))
+            // jpackage puts every jar under --input on the class path; VLC's
+            // Blu-ray menu jars have no business there.
+            File(input, "vlc").walkTopDown().filter { it.name.endsWith(".jar") }
+                    .forEach { it.delete() }
+        }
+        val iconDir = File(layout.buildDirectory.asFile.get(), "icon")
+        val icon = when {
+            isMacHost -> File(iconDir, "dock.icns").also {
+                run("iconutil", "-c", "icns", File(iconDir, "dock.iconset").path, "-o", it.path)
+            }
+            isWindowsHost -> File(iconDir, "dock.ico")
+            else -> File(iconDir, "dock-256.png")
+        }
+        val jpackage = File(jdk.get(), "bin/jpackage" + if (isWindowsHost) ".exe" else "")
+        val args = mutableListOf(jpackage.path,
+                "--type", "app-image",
+                "--name", "Universal Explorer",
+                "--dest", out.path,
+                "--input", input.path,
+                "--main-jar", appJar.get().asFile.name,
+                "--main-class", "dock.DockApp",
+                "--icon", icon.path,
+                "--vendor", "Universal Explorer contributors",
+                "--java-options", "--enable-native-access=ALL-UNNAMED",
+                "--java-options", "-Dfile.encoding=UTF-8")
+        if (isMacHost) {
+            // macOS refuses a 0.x bundle version; the About box reads the
+            // real one from the jar manifest.
+            args += listOf("--mac-package-identifier", "dev.universalexplorer.app")
+        } else {
+            args += listOf("--app-version", project.version.toString())
+        }
+        run(*args.toTypedArray())
+        input.deleteRecursively()
+        logger.lifecycle("Packaged: " + out.listFiles()!!.joinToString { it.path })
+    }
+}
+
+/** macOS: packages and copies the app into /Applications, replacing an older copy. */
+tasks.register("installApp") {
+    group = "distribution"
+    description = "Packages the app and installs it into /Applications (macOS)."
+    dependsOn("packageApp")
+    onlyIf { isMacHost }
+    doLast {
+        val app = File(layout.buildDirectory.asFile.get(), "package/Universal Explorer.app")
+        val target = File("/Applications/Universal Explorer.app")
+        target.deleteRecursively()
+        val p = ProcessBuilder("ditto", app.path, target.path).redirectErrorStream(true).start()
+        val text = p.inputStream.bufferedReader().readText()
+        check(p.waitFor() == 0) { "ditto failed:\n$text" }
+        logger.lifecycle("Installed: ${target.path}")
+    }
+}

@@ -108,13 +108,19 @@ public final class AppIcon {
         return out.toByteArray();
     }
 
-    /** Build-task entry: writes dock.ico and a few PNGs to a directory. */
+    /** Build-task entry: writes dock.ico, a few PNGs and the macOS iconset to a directory. */
     public static void main(String[] args) throws IOException {
         Path dir = Path.of(args.length > 0 ? args[0] : "build/icon");
         Files.createDirectories(dir);
         Files.write(dir.resolve("dock.ico"), ico(16, 24, 32, 48, 64, 128, 256));
         for (int s : new int[]{16, 32, 256}) {
             Files.write(dir.resolve("dock-" + s + ".png"), png(s));
+        }
+        // macOS: the iconset iconutil turns into dock.icns (1x and @2x per size).
+        Path iconset = Files.createDirectories(dir.resolve("dock.iconset"));
+        for (int s : new int[]{16, 32, 128, 256, 512}) {
+            Files.write(iconset.resolve("icon_" + s + "x" + s + ".png"), png(s));
+            Files.write(iconset.resolve("icon_" + s + "x" + s + "@2x.png"), png(s * 2));
         }
         System.out.println("icons written to " + dir.toAbsolutePath());
     }
