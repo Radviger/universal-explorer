@@ -358,7 +358,11 @@ public final class SessionsHome extends JPanel {
             JLabel header = new JLabel(sec.title());
             header.setFont(FontRegistry.uiMedium(11));
             header.setForeground(muted());
-            header.setAlignmentX(LEFT_ALIGNMENT);
+            // The rows' own (centered) alignment: mixed alignments make
+            // BoxLayout hang a left-aligned caption off the center line.
+            // Full width, text on the left.
+            header.setAlignmentX(CENTER_ALIGNMENT);
+            header.setHorizontalAlignment(JLabel.LEFT);
             header.setBorder(BorderFactory.createEmptyBorder(Tokens.GAP_2, Tokens.GAP_3,
                     Tokens.GAP_1, Tokens.GAP_3));
             header.setMaximumSize(new Dimension(Integer.MAX_VALUE, SECTION_HEIGHT));
@@ -828,6 +832,13 @@ public final class SessionsHome extends JPanel {
     public boolean sectionShownForTest(String title) {
         JLabel header = sectionHeaders.get(title);
         return header != null && header.isVisible();
+    }
+
+    /** Where the caption of the source titled so sits in the rows panel (tests). */
+    public Rectangle sectionBoundsForTest(String title) {
+        rowsPanel.setSize(CARD_WIDTH, rowsPanel.getPreferredSize().height);
+        rowsPanel.doLayout();
+        return sectionHeaders.get(title).getBounds();
     }
 
     /** True when row {@code i} is listed live from an external source (tests). */

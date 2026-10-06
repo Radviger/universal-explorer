@@ -130,6 +130,15 @@ class SourceSectionsLauncherTest {
     }
 
     @Test
+    void aSectionCaptionSpansTheCardFromItsLeftEdge() throws Exception {
+        var h = home(ssh(prod()));
+        var bounds = new AtomicReference<java.awt.Rectangle>();
+        SwingUtilities.invokeAndWait(() -> bounds.set(h.sectionBoundsForTest(SSH)));
+        assertEquals(0, bounds.get().x, "the caption starts at the card edge, not mid-card");
+        assertTrue(bounds.get().width > 500, "and spans the card: " + bounds.get());
+    }
+
+    @Test
     void aSourceRowShowsItsSourceInPlaceOfAnAge() throws Exception {
         var h = home(ssh(prod()));
         assertTrue(h.rowSnapshotForTest(0).contains("age=ssh config"));
