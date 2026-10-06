@@ -310,6 +310,26 @@ class S3FsTest {
     }
 
     @Test
+    void aSessionTokenTravelsSignedWithEveryRequest() throws IOException {
+        s3 = new FakeS3();
+        s3.start();
+        session = S3Sessions.connect(new S3Sessions.S3Spec("localhost", s3.port(), false,
+                null, FakeS3.ACCESS, FakeS3.SECRET, null, "temp-token-123"));
+        session.fs().list("/");
+        assertEquals("temp-token-123", s3.lastToken);
+        assertTrue(s3.lastSignedHeaders.contains("x-amz-security-token"),
+                "STS verifies the token only when it is signed: " + s3.lastSignedHeaders);
+        assertEquals(0, s3.rejectedSignatures);
+    }
+
+    @Test
+    void longTermKeysSendNoToken() throws IOException {
+        up();
+        fs.list("/");
+        assertEquals(null, s3.lastToken);
+    }
+
+    @Test
     void appendIsRefused() throws IOException {
         up();
         assertThrows(IOException.class, () -> fs.write("/media/up.bin", true));
@@ -348,6 +368,9 @@ class S3FsTest {
     private static final class FakeS3 {
 
         static final String ACCESS = "docktest";
+        /** What the newest request carried, for the session-token check. */
+        volatile String lastSignedHeaders;
+        volatile String lastToken;
         static final char[] SECRET = "dock-secret-1".toCharArray();
         private static final String SECRET_TEXT = new String(SECRET);
 
@@ -449,6 +472,8 @@ class S3FsTest {
             String credential = part(auth, "Credential=");
             String signedHeaders = part(auth, "SignedHeaders=");
             String signature = part(auth, "Signature=");
+            lastSignedHeaders = signedHeaders;
+            lastToken = x.getRequestHeaders().getFirst("x-amz-security-token");
             String[] c = credential.split("/");
             if (c.length != 5 || !c[0].equals(ACCESS)) return false;
             String date = c[1], region = c[2];

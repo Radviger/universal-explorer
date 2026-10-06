@@ -21,6 +21,16 @@ public interface ConnectionFragment {
     /** Caption for the shared user row — S3 calls it the access key ID. */
     default String userLabel() { return "User"; }
 
+    /** The user row's caption under one auth model — S3's profile mode
+     *  names the profile there. */
+    default String userLabel(AuthMode mode) { return userLabel(); }
+
+    /** The line shown in place of the secret inputs while an agent-style
+     *  model (keys held outside the app) is picked. */
+    default String agentHint() {
+        return "Keys are offered by the SSH agent — add them with ssh-add.";
+    }
+
     /** Prefill for the shared user row while the user hasn't typed one
      *  (protocols whose login is rarely the OS account — S3's access
      *  keys — return an empty string). */

@@ -35,6 +35,26 @@ class S3BackendTest {
     }
 
     @Test
+    void aProfileSiteNamesItsProfileNotAKey() {
+        Site site = new Site("AWS work", Protocol.S3, "s3.eu-west-1.amazonaws.com", 443,
+                "work", null, true, null, null, false, true, 0, null, null, null, "eu-west-1");
+        assertEquals("s3.eu-west-1.amazonaws.com  ·  eu-west-1  ·  profile work",
+                backend.secondaryText(site));
+    }
+
+    @Test
+    void aMissingProfileFailsWithItsName() {
+        Site site = new Site("AWS ghost", Protocol.S3, "s3.amazonaws.com", 443,
+                "unit-no-such-profile-xyz", null, true, null, null, false, true, 0);
+        var e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> backend.dial(site, target -> {
+                    throw new AssertionError("a profile site never asks for a stored secret");
+                }));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                e.getMessage().contains("unit-no-such-profile-xyz"), e.getMessage());
+    }
+
+    @Test
     void theCloudGlyphMarksS3Everywhere() {
         assertEquals(dock.kit.Glyphs.CLOUD, backend.glyph());
         assertEquals(dock.kit.Glyphs.CLOUD, backend.glyphOf(new S3Fs(null,

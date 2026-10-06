@@ -92,6 +92,7 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     private JLabel shareLabel;
     private JPanel keyRow;
     private JLabel agentHint;
+    private JLabel userCaption;
     private final JCheckBox saveSession = new JCheckBox("Save session");
     private final JLabel errorLabel = new JLabel();
     private static final Color ERROR_RED = new Color(0xE5484D);
@@ -218,11 +219,10 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
             fragmentRowInputs.add(extra.input());
         }
 
-        field(form, gc, row++, fragment.userLabel(), userField);
+        userCaption = field(form, gc, row++, fragment.userLabel(selectedMode()), userField);
         authLabel = field(form, gc, row++, "Authentication", combo(authCombo));
 
-        agentHint = new JLabel("Keys are offered by the Windows OpenSSH agent — "
-                + "plug in your YubiKey and add it with ssh-add.");
+        agentHint = new JLabel(fragment.agentHint());
         agentHint.setFont(FontRegistry.ui());
         agentHint.setForeground(muted());
         gc.gridx = 1; gc.gridy = row; gc.gridwidth = 2;
@@ -362,6 +362,8 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
         passphraseLabel.setVisible(mode.key());
         passphraseField.setVisible(mode.key());
         agentHint.setVisible(mode.agent());
+        agentHint.setText(fragment.agentHint());
+        userCaption.setText(fragment.userLabel(mode));
         fragment.applyAuthMode(mode);
         boolean pathRow = fragment.pathLabel() != null;
         shareLabel.setVisible(pathRow);
@@ -792,6 +794,10 @@ public final class ConnectDialog extends JDialog implements ConnectForm {
     /** The dialog's primary button — "Connect" to dial, "Save" to edit. */
     public JButton primaryButtonForTest() {
         return connectButton;
+    }
+
+    public String userCaptionForTest() {
+        return userCaption.getText();
     }
 
     public JButton testButtonForTest() {

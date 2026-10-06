@@ -27,8 +27,16 @@ public final class S3Sessions {
      * copy of the secret.
      */
     public record S3Spec(String host, int port, boolean secure, String region,
-                         String accessKey, char[] secretKey, String bucket) {
+                         String accessKey, char[] secretKey, String bucket,
+                         String sessionToken) {
+        /** Long-term keys: no session token. */
+        public S3Spec(String host, int port, boolean secure, String region,
+                      String accessKey, char[] secretKey, String bucket) {
+            this(host, port, secure, region, accessKey, secretKey, bucket, null);
+        }
+
         public S3Spec {
+            if (sessionToken != null && sessionToken.isBlank()) sessionToken = null;
             if (port <= 0) port = secure ? 443 : 80;
             region = region == null || region.isBlank()
                     ? "us-east-1" : region.trim().toLowerCase();

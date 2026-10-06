@@ -112,6 +112,8 @@ public final class S3Fs implements FileSystem {
         Map<String, String> toSign = new LinkedHashMap<>();
         toSign.put("host", authority);
         if (extraHeaders != null) toSign.putAll(extraHeaders);
+        // Temporary credentials (STS) prove themselves with a signed token.
+        if (spec.sessionToken() != null) toSign.put("x-amz-security-token", spec.sessionToken());
         String amzDate = SigV4.amzDate(Instant.now());
         String authorization = SigV4.authorization(method, rawPath, query, toSign,
                 payloadHash, spec.accessKey(), spec.secretKey(), spec.region(), amzDate);
@@ -124,6 +126,7 @@ public final class S3Fs implements FileSystem {
                 .header("x-amz-content-sha256", payloadHash)
                 .header("Authorization", authorization);
         if (timeout != null) rb.timeout(timeout);
+        if (spec.sessionToken() != null) rb.header("x-amz-security-token", spec.sessionToken());
         if (extraHeaders != null) {
             for (Map.Entry<String, String> e : extraHeaders.entrySet()) {
                 rb.header(e.getKey(), e.getValue());

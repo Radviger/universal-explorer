@@ -250,7 +250,9 @@ class ConnectDialogProtocolTest {
         assertEquals("Opening bucket", d.pathLabelForTest());
         assertEquals("Access key ID", s3.userLabel(), "the shared user row speaks S3");
         assertEquals("Secret access key", s3.passwordLabel(), "so does the shared password row");
-        assertFalse(d.authPickerVisible(), "one auth model — the picker row hides entirely");
+        assertTrue(d.authPickerVisible(), "access key or AWS profile");
+        assertEquals(java.util.List.of("Access key", "AWS profile"), comboItems(d));
+        assertEquals("Access key ID", d.userCaptionForTest());
         assertTrue(d.userForTest().isEmpty(), "the OS login is not an access key prefill");
         assertTrue(d.passwordInputsVisible());
 
@@ -314,7 +316,38 @@ class ConnectDialogProtocolTest {
         assertEquals("443", d.portForTest());
         assertEquals("Opening bucket", d.pathLabelForTest());
         assertTrue(d.shareRowVisible());
-        assertEquals("Password", d.authForTest().getSelectedItem());
+        assertEquals("Access key", d.authForTest().getSelectedItem());
+        d.dispose();
+    }
+
+    @Test
+    void s3ProfileModeNamesAProfileAndKeepsNoSecret() {
+        ConnectDialog d = new ConnectDialog(null, (session, name) -> {});
+        d.protocolForTest().setSelectedItem("S3");
+        d.authForTest().setSelectedItem("AWS profile");
+        assertEquals("AWS profile", d.userCaptionForTest(), "the user row names the profile");
+        assertFalse(d.passwordInputsVisible(), "no secret is typed or stored");
+        assertTrue(d.agentHintVisible());
+        d.setHostAndUserForTest("s3.eu-west-1.amazonaws.com", "work");
+        Site site = d.fragmentForTest().siteFromForm("AWS work",
+                d.fragmentForTest().authModes()[1], d);
+        assertTrue(site.useAgent(), "a profile site's keys live outside the app");
+        assertEquals("work", site.user());
+
+        d.authForTest().setSelectedItem("Access key");
+        assertEquals("Access key ID", d.userCaptionForTest());
+        assertTrue(d.passwordInputsVisible());
+        d.dispose();
+    }
+
+    @Test
+    void editingAProfileSiteRestoresProfileMode() {
+        Site site = new Site("AWS work", Protocol.S3, "s3.amazonaws.com", 443, "work",
+                null, true, null, null, false, true, 0);
+        ConnectDialog d = new ConnectDialog(null, site, (session, name) -> {});
+        assertEquals("AWS profile", d.authForTest().getSelectedItem());
+        assertEquals("work", d.userForTest());
+        assertEquals("AWS profile", d.userCaptionForTest());
         d.dispose();
     }
 
