@@ -187,13 +187,18 @@ public final class SshConfig {
 
     private static List<Path> includeTargets(String arg, Path home) throws IOException {
         String expanded = arg.startsWith("~") ? home + arg.substring(1) : arg;
-        Path pattern = Path.of(expanded);
-        if (!pattern.isAbsolute()) pattern = home.resolve(".ssh").resolve(expanded);
-        if (!expanded.contains("*") && !expanded.contains("?")) return List.of(pattern);
-        Path dir = pattern.getParent();
-        if (dir == null || !Files.isDirectory(dir)) return List.of();
-        PathMatcher m = FileSystems.getDefault().getPathMatcher(
-                "glob:" + pattern.getFileName().toString());
+        if (!expanded.contains("*") && !expanded.contains("?")) {
+            Path p = Path.of(expanded);
+            return List.of(p.isAbsolute() ? p : home.resolve(".ssh").resolve(p));
+        }
+        // A glob lives in the last segment; '*' and '?' are illegal path
+        // characters on Windows, so the split stays strings-only.
+        int cut = Math.max(expanded.lastIndexOf('/'), expanded.lastIndexOf('\\')) + 1;
+        Path dir = Path.of(expanded.substring(0, cut));
+        String pattern = expanded.substring(cut);
+        if (!dir.isAbsolute()) dir = home.resolve(".ssh").resolve(dir);
+        if (pattern.isEmpty() || !Files.isDirectory(dir)) return List.of();
+        PathMatcher m = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
         try (Stream<Path> files = Files.list(dir)) {
             return files.filter(p -> m.matches(p.getFileName())).sorted().toList();
         }
