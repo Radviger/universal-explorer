@@ -70,6 +70,24 @@ gradlew.bat :app:icon     # render the app icon
 The screenshot harness — which is also the deterministic UI verifier —
 runs via `gradlew.bat :app:run --args="--screenshot"`.
 
+### Package and install
+
+Windows builds a self-contained MSI (the bundled JRE and LibVLC ride
+along — the installed app needs no Java, no VLC and no environment
+setup). The first `packageMsi` downloads the pinned WiX toolset it
+needs, the same way the app itself downloads LibVLC.
+
+```
+gradlew.bat :app:packageApp    # self-contained app image in app/build/package
+gradlew.bat :app:packageMsi    # the MSI installer in app/build/dist
+gradlew.bat :app:installApp    # installs it (C:\Program Files, one UAC prompt,
+                               # Start Menu group, Add/Remove Programs entry)
+gradlew.bat :app:uninstallApp  # removes it again
+```
+
+Installing over an already installed build of the same version is
+refused by Windows Installer — uninstall first or bump the version.
+
 ## Where your data lives
 
 - Sessions and remembered paths: `%APPDATA%\Universal Explorer\sessions.json`

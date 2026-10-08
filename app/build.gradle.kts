@@ -3,6 +3,7 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.zip.ZipFile
 
 plugins {
@@ -192,18 +193,111 @@ fun unpackMacDmg(dmg: File, root: File) {
 
 tasks.named("run") { dependsOn("downloadVlc") }
 
-/** Removes a packaging output, retried: a freshly written
- *  "Universal Explorer.exe" can sit delete-pending in a Windows
- *  defender scan for a moment, and deleteRecursively() reports that
- *  as a silent false — which jpackage then answers with a confusing
- *  "destination directory already exists". */
+/** Removes a packaging output. jpackage marks the launcher it wrote
+ *  read-only, and Windows refuses to delete read-only files — reported
+ *  as a silent false that jpackage then answers with a confusing
+ *  "destination directory already exists". The attribute goes first;
+ *  the retries cover a momentary defender scan of a fresh build. */
 fun deleteForPackaging(dir: File) {
     if (!dir.isDirectory) return
-    repeat(5) {
+    repeat(10) {
+        dir.walkBottomUp().forEach { it.setWritable(true) }
         if (dir.deleteRecursively() && !dir.exists()) return
         Thread.sleep(1000)
     }
     check(!dir.exists()) { "${dir.path} is locked (antivirus scan of a fresh build?)" }
+}
+
+/** Runs a packaging tool, failing the task with its combined output. A
+ *  directory in `pathPrepend` goes in front of the child's PATH — how the
+ *  WiX tools reach jpackage without a system-wide install. (The env map is
+ *  case-sensitive while the variable's real spelling varies — PATH from a
+ *  bash-launched daemon, Path from cmd — so the existing key is reused.) */
+fun runTool(vararg cmd: String, pathPrepend: File? = null) {
+    val p = ProcessBuilder(*cmd).redirectErrorStream(true)
+    if (pathPrepend != null) {
+        val env = p.environment()
+        val pathKey = env.keys.firstOrNull { it.equals("Path", ignoreCase = true) } ?: "Path"
+        env[pathKey] = pathPrepend.path + File.pathSeparator + (env[pathKey] ?: "")
+    }
+    val proc = p.start()
+    val text = proc.inputStream.bufferedReader().readText()
+    check(proc.waitFor() == 0) { "${cmd.first()} failed:\n$text" }
+}
+
+/** The one MSI packageMsi leaves in build/dist. */
+fun msiIn(dist: File): File =
+        dist.listFiles { f -> f.extension.equals("msi", ignoreCase = true) }?.singleOrNull()
+                ?: error("expected exactly one MSI in ${dist.path} — run :app:packageMsi first")
+
+/** The ProductCode inside the built MSI. jpackage derives it from the
+ *  name and vendor, so it is stable across builds — unlike the
+ *  PackageCode, which is new on every build and is why /x by package
+ *  path fails with a bogus "another version of this product is already
+ *  installed" once the installer has been rebuilt. */
+fun productCodeOf(msi: File): String {
+    val script = """
+        ${'$'}ProgressPreference = 'SilentlyContinue'
+        ${'$'}a = New-Object -ComObject WindowsInstaller.Installer
+        ${'$'}db = ${'$'}a.GetType().InvokeMember('OpenDatabase','InvokeMethod',${'$'}null,${'$'}a,@('${msi.path}',0))
+        ${'$'}view = ${'$'}db.GetType().InvokeMember('OpenView','InvokeMethod',${'$'}null,${'$'}db,@("SELECT Value FROM Property WHERE Property='ProductCode'"))
+        ${'$'}view.GetType().InvokeMember('Execute','InvokeMethod',${'$'}null,${'$'}view,${'$'}null)
+        ${'$'}rec = ${'$'}view.GetType().InvokeMember('Fetch','InvokeMethod',${'$'}null,${'$'}view,${'$'}null)
+        Write-Output ${'$'}rec.GetType().InvokeMember('StringData','GetProperty',${'$'}null,${'$'}rec,@(1))
+    """.trimIndent()
+    // -EncodedCommand carries the script base64-encoded: -Command would
+    // eat the SQL's double quotes at the argv boundary.
+    val encoded = Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_16LE))
+    val p = ProcessBuilder("powershell.exe", "-NoProfile", "-EncodedCommand", encoded)
+            .redirectErrorStream(true).start()
+    val text = p.inputStream.bufferedReader().readText()
+    val guid = Regex("\\{[0-9A-Fa-f-]+}").find(text)?.value
+    check(p.waitFor() == 0 && guid != null) {
+        "cannot read the ProductCode from ${msi.path}: $text"
+    }
+    return guid
+}
+
+/** Elevated msiexec through the one UAC prompt (-Verb RunAs); /qb keeps
+ *  its progress bar. Uninstalls go by the stable ProductCode; installs
+ *  are staged under a space-free name first, because Start-Process
+ *  (5.1) composes the child command line with no quoting at all and an
+ *  installer path carrying spaces arrives shredded (1639). 3010
+ *  ("reboot required") counts as done; a declined — or auto-dismissed —
+ *  prompt arrives as 1223. */
+fun msiexecElevated(verb: String, msi: File) {
+    val arg = if (verb == "x") {
+        productCodeOf(msi)
+    } else {
+        val staged = File(System.getenv("TEMP") ?: System.getProperty("java.io.tmpdir"),
+                "universal-explorer-installer.msi")
+        check(!staged.path.contains(' ')) { "cannot stage the installer under ${staged.path}" }
+        msi.copyTo(staged, overwrite = true)
+        staged.path
+    }
+    val script = """
+        try {
+            ${'$'}p = Start-Process msiexec.exe -ArgumentList '/$verb','$arg','/qb' -Verb RunAs -PassThru -Wait
+            if (${'$'}null -ne ${'$'}p.ExitCode) { exit ${'$'}p.ExitCode }
+            exit 0
+        } catch {
+            Write-Output ${'$'}_.Exception.Message
+            exit 1223
+        }
+    """.trimIndent()
+    val encoded = Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_16LE))
+    val p = ProcessBuilder("powershell.exe", "-NoProfile", "-EncodedCommand", encoded)
+            .redirectErrorStream(true).start()
+    val text = p.inputStream.bufferedReader().readText()
+    val code = p.waitFor()
+    check(code == 0 || code == 3010) {
+        val reason = when (code) {
+            1223 -> "the UAC prompt was declined or dismissed"
+            1638 -> "another version is already installed — run :app:uninstallApp first or bump the version"
+            else -> "exit $code"
+        }
+        "msiexec /$verb failed ($reason):\n$text"
+    }
 }
 
 /** Renders the app mark to a multi-size PNG-in-ICO (+ PNGs) in build/icon. */
@@ -287,19 +381,131 @@ tasks.register("packageApp") {
     }
 }
 
-/** macOS: packages and copies the app into /Applications, replacing an older copy. */
+/** The WiX 3.14 toolset jpackage builds MSIs with — the pinned official
+ *  binaries, unpacked into build/wix314. Nothing is installed system-wide:
+ *  candle and light reach jpackage through the PATH of the packaging
+ *  process alone. */
+val wixUrl = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
+val wixSha256 = "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"
+val wixDir = layout.buildDirectory.dir("wix314")
+
+tasks.register("downloadWix") {
+    group = "build"
+    description = "Downloads and unpacks the pinned WiX 3.14 toolset into build/wix314 (for MSIs)."
+    outputs.file(wixDir.map { it.file("candle.exe") })
+    outputs.upToDateWhen { wixDir.get().file("candle.exe").asFile.exists() }
+    doLast {
+        val target = File(layout.buildDirectory.asFile.get(), "wix-dl/wix314-binaries.zip")
+        target.parentFile.mkdirs()
+        val sha256 = MessageDigest.getInstance("SHA-256")
+        fun digest(file: File) =
+                sha256.digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+        if (!target.exists() || digest(target) != wixSha256) {
+            logger.lifecycle("Downloading WiX 3.14.1 (~35 MB, once)…")
+            URI(wixUrl).toURL().openStream().use { input ->
+                Files.copy(input, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            check(digest(target) == wixSha256) { "WiX download digest mismatch: ${digest(target)}" }
+        }
+        val root = wixDir.get().asFile
+        deleteForPackaging(root)
+        root.mkdirs()
+        val rootPath = root.canonicalFile.toPath()
+        ZipFile(target).use { zip ->
+            for (entry in zip.entries()) {
+                if (entry.isDirectory) continue
+                val out = File(root, entry.name)
+                // Zip-slip guard: every entry must stay inside build/wix314.
+                check(out.canonicalFile.toPath().startsWith(rootPath)) {
+                    "bad zip entry: ${entry.name}"
+                }
+                out.parentFile.mkdirs()
+                zip.getInputStream(entry).use { input ->
+                    Files.copy(input, out.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+        }
+        check(File(root, "candle.exe").isFile && File(root, "light.exe").isFile) {
+            "the WiX zip unpacked without candle.exe/light.exe — layout changed?"
+        }
+    }
+}
+
+/**
+ * Windows: wraps the packaged app image in an MSI — the installer
+ * Add/Remove Programs can install, upgrade and remove, living in the
+ * Programs folder with a Start Menu group.
+ */
+tasks.register("packageMsi") {
+    group = "distribution"
+    description = "Builds the MSI installer around the packaged app into build/dist (Windows)."
+    dependsOn("packageApp", "downloadWix")
+    onlyIf { isWindowsHost }
+    val jdk = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+            .map { it.metadata.installationPath.asFile }
+    doLast {
+        val image = File(layout.buildDirectory.asFile.get(), "package/Universal Explorer")
+        val out = File(layout.buildDirectory.asFile.get(), "dist")
+        deleteForPackaging(out)
+        out.mkdirs()
+        val jpackage = File(jdk.get(), "bin/jpackage.exe")
+        runTool(jpackage.path,
+                "--type", "msi",
+                "--app-image", image.path,
+                "--dest", out.path,
+                "--name", "Universal Explorer",
+                "--app-version", project.version.toString(),
+                "--vendor", "Universal Explorer contributors",
+                "--win-menu", "--win-menu-group", "Universal Explorer",
+                pathPrepend = wixDir.get().asFile)
+        logger.lifecycle("Installer: ${msiIn(out).path}")
+    }
+}
+
+/** Installs the app for this OS: the MSI into the Programs folder on
+ *  Windows (one UAC prompt), a copy into /Applications on macOS. */
 tasks.register("installApp") {
     group = "distribution"
-    description = "Packages the app and installs it into /Applications (macOS)."
-    dependsOn("packageApp")
-    onlyIf { isMacHost }
+    description = "Packages and installs the app for this OS (MSI on Windows, /Applications on macOS)."
+    if (isWindowsHost) dependsOn("packageMsi") else dependsOn("packageApp")
     doLast {
-        val app = File(layout.buildDirectory.asFile.get(), "package/Universal Explorer.app")
-        val target = File("/Applications/Universal Explorer.app")
-        target.deleteRecursively()
-        val p = ProcessBuilder("ditto", app.path, target.path).redirectErrorStream(true).start()
-        val text = p.inputStream.bufferedReader().readText()
-        check(p.waitFor() == 0) { "ditto failed:\n$text" }
-        logger.lifecycle("Installed: ${target.path}")
+        if (isWindowsHost) {
+            msiexecElevated("i", msiIn(File(layout.buildDirectory.asFile.get(), "dist")))
+            val exe = File(System.getenv("ProgramFiles") ?: "C:\\Program Files",
+                    "Universal Explorer/Universal Explorer.exe")
+            check(exe.isFile) { "msiexec reported success but ${exe.path} is missing" }
+            logger.lifecycle("Installed: ${exe.parentFile.path}")
+        } else if (isMacHost) {
+            val app = File(layout.buildDirectory.asFile.get(), "package/Universal Explorer.app")
+            val target = File("/Applications/Universal Explorer.app")
+            target.deleteRecursively()
+            val p = ProcessBuilder("ditto", app.path, target.path).redirectErrorStream(true).start()
+            val text = p.inputStream.bufferedReader().readText()
+            check(p.waitFor() == 0) { "ditto failed:\n$text" }
+            logger.lifecycle("Installed: ${target.path}")
+        } else {
+            check(false) { "installApp has no Linux step yet — run the app via :app:run or packageApp's image." }
+        }
+    }
+}
+
+/** Removes the installed app: the MSI product on Windows, the
+ *  /Applications copy on macOS. */
+tasks.register("uninstallApp") {
+    group = "distribution"
+    description = "Uninstalls the app for this OS (MSI on Windows, /Applications on macOS)."
+    doLast {
+        if (isWindowsHost) {
+            msiexecElevated("x", msiIn(File(layout.buildDirectory.asFile.get(), "dist")))
+            val dir = File(System.getenv("ProgramFiles") ?: "C:\\Program Files", "Universal Explorer")
+            check(!dir.isDirectory) { "msiexec reported success but ${dir.path} still exists" }
+            logger.lifecycle("Removed: ${dir.path}")
+        } else if (isMacHost) {
+            val target = File("/Applications/Universal Explorer.app")
+            target.deleteRecursively()
+            logger.lifecycle("Removed: ${target.path}")
+        } else {
+            check(false) { "uninstallApp has no Linux step yet." }
+        }
     }
 }
