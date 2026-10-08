@@ -640,10 +640,7 @@ public final class SessionsHome extends JPanel {
             if (backend != null) return backend.secondaryText(site);
             // A site whose backend module is absent from this build still
             // renders, with the plain endpoint shape.
-            String endpoint = site.user() + "@" + site.host()
-                    + (site.port() == 22 ? "" : ":" + site.port());
-            return endpoint + "  ·  " + (site.useAgent() ? "agent"
-                    : site.keyPath() == null ? "password" : "key file");
+            return site.host() + (site.port() == 22 ? "" : ":" + site.port());
         }
 
         @Override

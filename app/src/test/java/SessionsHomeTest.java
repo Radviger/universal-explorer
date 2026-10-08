@@ -127,6 +127,19 @@ class SessionsHomeTest {
     }
 
     @Test
+    void theSecondLineIsTheEndpointOnly() throws Exception {
+        SessionsHome home = build(new RecordingHost());
+        // unit-hetzner-build: user "root", a key file set — the row's
+        // second line says only where, never who or how.
+        String snapshot = home.rowSnapshotForTest(1);
+        assertTrue(snapshot.contains("secondary=hetzner.example.com"),
+                "the endpoint renders: " + snapshot);
+        assertFalse(snapshot.contains("root@") || snapshot.contains("key file")
+                        || snapshot.contains("password") || snapshot.contains("agent"),
+                "no user or auth-method hint on the launcher row");
+    }
+
+    @Test
     void typedCharactersJumpToTheSearchField() throws Exception {
         SessionsHome home = build(new RecordingHost());
 

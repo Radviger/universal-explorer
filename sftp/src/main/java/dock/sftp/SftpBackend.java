@@ -54,10 +54,7 @@ public final class SftpBackend implements ProtocolBackend {
 
     @Override
     public String secondaryText(Site site) {
-        String endpoint = site.user() + "@" + site.host()
-                + (site.port() == 22 ? "" : ":" + site.port());
-        return endpoint + "  ·  " + (site.useAgent() ? "agent"
-                : site.keyPath() == null ? "password" : "key file");
+        return site.host() + (site.port() == 22 ? "" : ":" + site.port());
     }
 
     @Override

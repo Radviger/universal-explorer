@@ -44,7 +44,7 @@ public final class WebDavBackend implements ProtocolBackend {
         String url = (site.secure() ? "https://" : "http://") + site.host()
                 + (site.port() == defaultPort ? "" : ":" + site.port())
                 + (site.initialPath() == null ? "" : site.initialPath());
-        return url + "  ·  " + (site.guest() ? "anonymous" : site.user());
+        return url;
     }
 
     @Override

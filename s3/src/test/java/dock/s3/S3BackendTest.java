@@ -16,29 +16,31 @@ class S3BackendTest {
     private final S3Backend backend = new S3Backend();
 
     @Test
-    void theHomeRowShowsHowNotWithWhat() {
+    void theHomeRowShowsTheEndpointOnly() {
         Site site = new Site("unit-s3", Protocol.S3, "s3.example.com", 443,
                 "AKIAIOSFODNN7EXAMPLE", null, false, null, "backups", false, true, 0,
                 null, null, null, "eu-west-1");
         String line = backend.secondaryText(site);
         assertFalse(line.contains("AKIAIOSFODNN7EXAMPLE"),
                 "the access key ID is half of a key pair — it never renders");
-        assertEquals("s3.example.com  ·  eu-west-1  ·  access key", line,
-                "endpoint, optional region, and the authorization type — SFTP's tail shape");
+        assertFalse(line.contains("access key"),
+                "the auth-method hint carries nothing the user can act on");
+        assertEquals("s3.example.com  ·  eu-west-1", line,
+                "endpoint and optional region — no user, no auth-method hint");
     }
 
     @Test
     void aCustomPortShowsAndADefaultRegionHides() {
         Site site = new Site("unit-minio", Protocol.S3, "minio.example.com", 9000,
                 "docktest", null, false, null, null, false, false, 0);
-        assertEquals("minio.example.com:9000  ·  access key", backend.secondaryText(site));
+        assertEquals("minio.example.com:9000", backend.secondaryText(site));
     }
 
     @Test
-    void aProfileSiteNamesItsProfileNotAKey() {
+    void aProfileSiteRendersLikeAKeySite() {
         Site site = new Site("AWS work", Protocol.S3, "s3.eu-west-1.amazonaws.com", 443,
                 "work", null, true, null, null, false, true, 0, null, null, null, "eu-west-1");
-        assertEquals("s3.eu-west-1.amazonaws.com  ·  eu-west-1  ·  profile work",
+        assertEquals("s3.eu-west-1.amazonaws.com  ·  eu-west-1",
                 backend.secondaryText(site));
     }
 

@@ -61,13 +61,13 @@ public final class S3Backend implements ProtocolBackend {
     @Override
     public String secondaryText(Site site) {
         // The access key ID stays off the home row — half of a key pair is
-        // still credential material; like SFTP's tail, the line says how
-        // the site authenticates, not with what.
+        // still credential material — and so do the user and the auth
+        // method: the row says where, the edit form says how.
         String text = site.host() + (site.port() == 443 ? "" : ":" + site.port());
         if (site.region() != null && !site.region().isBlank()) {
             text += "  ·  " + site.region();
         }
-        return text + (site.useAgent() ? "  ·  profile " + site.user() : "  ·  access key");
+        return text;
     }
 
     @Override

@@ -40,11 +40,7 @@ public final class SmbBackend implements ProtocolBackend {
 
     @Override
     public String secondaryText(Site site) {
-        String login = site.guest() ? "guest"
-                : (site.domain() == null || site.domain().isEmpty() ? ""
-                        : site.domain() + "\\") + site.user();
-        return "\\\\" + site.host() + (site.port() == 445 ? "" : ":" + site.port())
-                + "  ·  " + login;
+        return "\\\\" + site.host() + (site.port() == 445 ? "" : ":" + site.port());
     }
 
     @Override

@@ -45,7 +45,7 @@ public final class FtpBackend implements ProtocolBackend {
                 + (site.port() == defaultPort ? "" : ":" + site.port())
                 + (site.initialPath() == null || site.initialPath().isEmpty()
                         ? "" : site.initialPath());
-        return url + "  ·  " + (site.guest() ? "anonymous" : site.user());
+        return url;
     }
 
     @Override

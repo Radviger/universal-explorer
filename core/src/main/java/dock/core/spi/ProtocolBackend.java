@@ -31,7 +31,9 @@ public interface ProtocolBackend {
     /** The launcher/path-head mark: a Symbols Nerd Font codepoint. */
     String glyph();
 
-    /** The launcher's second line for a saved site of this protocol. */
+    /** The launcher's second line for a saved site of this protocol: the
+     *  endpoint (scheme/host/port/region as the protocol has them) — never
+     *  the user or the auth method, which are edit-form detail. */
     String secondaryText(Site site);
 
     /** This backend's glyph when {@code fs} is one of its filesystems,
