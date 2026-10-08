@@ -192,6 +192,20 @@ fun unpackMacDmg(dmg: File, root: File) {
 
 tasks.named("run") { dependsOn("downloadVlc") }
 
+/** Removes a packaging output, retried: a freshly written
+ *  "Universal Explorer.exe" can sit delete-pending in a Windows
+ *  defender scan for a moment, and deleteRecursively() reports that
+ *  as a silent false — which jpackage then answers with a confusing
+ *  "destination directory already exists". */
+fun deleteForPackaging(dir: File) {
+    if (!dir.isDirectory) return
+    repeat(5) {
+        if (dir.deleteRecursively() && !dir.exists()) return
+        Thread.sleep(1000)
+    }
+    check(!dir.exists()) { "${dir.path} is locked (antivirus scan of a fresh build?)" }
+}
+
 /** Renders the app mark to a multi-size PNG-in-ICO (+ PNGs) in build/icon. */
 tasks.register<JavaExec>("icon") {
     group = "build"
@@ -219,7 +233,7 @@ tasks.register("packageApp") {
     doLast {
         val out = File(layout.buildDirectory.asFile.get(), "package")
         val input = File(out, "input")
-        out.deleteRecursively()
+        deleteForPackaging(out)
         input.mkdirs()
         fun run(vararg cmd: String) {
             val p = ProcessBuilder(*cmd).redirectErrorStream(true).start()
