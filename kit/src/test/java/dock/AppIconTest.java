@@ -3,61 +3,106 @@ package dock;
 import dock.kit.AppIcon;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The icon artifacts are structure-checked byte by byte: the ICO parses as
- * a valid PNG-in-ICO directory (offsets/sizes consistent, every frame a
- * real PNG), and the renders decode back to the requested dimensions with
- * actual ink in them.
+ * a valid little-endian DIB-framed directory (offsets/sizes consistent,
+ * every frame a BITMAPINFOHEADER + BGRA + AND-mask block the Windows
+ * resource editor accepts — never a compressed PNG frame), and the renders
+ * decode back to the requested dimensions with actual ink in them.
  */
 class AppIconTest {
 
     @Test
-    void icoIsAValidPngFramedDirectory() throws Exception {
+    void icoIsAValidDibFramedDirectoryTheWindowsResourceEditorAccepts() throws Exception {
         int[] sizes = {16, 32, 256};
         byte[] ico = AppIcon.ico(sizes);
-        var in = new DataInputStream(new ByteArrayInputStream(ico));
 
-        assertEquals(0, in.readShort(), "reserved");
-        assertEquals(1, in.readShort(), "type: icon");
-        assertEquals(sizes.length, in.readShort(), "frame count");
+        // Little-endian accessors: the ICO format reads like Windows writes.
+        assertEquals(0, leShort(ico, 0), "reserved");
+        assertEquals(1, leShort(ico, 2), "type: icon");
+        assertEquals(sizes.length, leShort(ico, 4), "frame count");
 
         int[] frameOffset = new int[sizes.length];
         int[] frameSize = new int[sizes.length];
         int next = 6 + 16 * sizes.length;
         for (int i = 0; i < sizes.length; i++) {
-            int width = in.readUnsignedByte();
+            int e = 6 + 16 * i;
+            int width = ico[e] & 0xFF;
             assertEquals(sizes[i] >= 256 ? 0 : sizes[i], width, "width byte of frame " + i);
-            assertEquals(width, in.readUnsignedByte(), "height byte mirrors width");
-            assertEquals(0, in.readUnsignedByte(), "no palette");
-            assertEquals(0, in.readUnsignedByte(), "reserved");
-            assertEquals(1, in.readShort(), "one plane");
-            assertEquals(32, in.readShort(), "32bpp");
-            frameSize[i] = in.readInt();
-            assertTrue(frameSize[i] > 0, "frame has bytes");
-            frameOffset[i] = in.readInt();
+            assertEquals(width, ico[e + 1] & 0xFF, "height byte mirrors width");
+            assertEquals(0, ico[e + 2] & 0xFF, "no palette");
+            assertEquals(0, ico[e + 3] & 0xFF, "reserved");
+            assertEquals(1, leShort(ico, e + 4), "one plane");
+            assertEquals(32, leShort(ico, e + 6), "32bpp");
+            frameSize[i] = leInt(ico, e + 8);
+            // 40 bytes of header + BGRA pixels + the padded all-zero AND mask:
+            // the exact size of an uncompressed DIB frame, so no frame can be
+            // a smuggled-in PNG.
+            int maskRow = (sizes[i] + 31) / 32 * 4;
+            assertEquals(40 + sizes[i] * sizes[i] * 4 + maskRow * sizes[i], frameSize[i],
+                    "frame " + i + " is an uncompressed DIB block");
+            frameOffset[i] = leInt(ico, e + 12);
             assertEquals(next, frameOffset[i], "frame " + i + " sits right after the previous");
             next += frameSize[i];
         }
         assertEquals(ico.length, next, "directory accounts for every byte of the file");
 
         for (int i = 0; i < sizes.length; i++) {
+            int s = sizes[i];
             int p = frameOffset[i];
-            assertEquals((byte) 0x89, ico[p], "PNG magic 0 of frame " + i);
-            assertEquals((byte) 0x50, ico[p + 1], "'P'");
-            assertEquals((byte) 0x4E, ico[p + 2], "'N'");
-            assertEquals((byte) 0x47, ico[p + 3], "'G'");
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(
-                    ico, p, frameSize[i]));
-            assertEquals(sizes[i], img.getWidth(), "frame " + i + " width");
-            assertEquals(sizes[i], img.getHeight(), "frame " + i + " height");
+            assertNotEquals(0x89, ico[p] & 0xFF, "frame " + i + " must not start as a PNG (0x89)");
+            assertEquals(40, leInt(ico, p), "frame " + i + " opens with a BITMAPINFOHEADER");
+            assertEquals(s, leInt(ico, p + 4), "frame " + i + " width");
+            assertEquals(s * 2, leInt(ico, p + 8), "frame " + i + " height counts XOR and AND rows");
+            assertEquals(1, leShort(ico, p + 12), "frame " + i + " planes");
+            assertEquals(32, leShort(ico, p + 14), "frame " + i + " bpp");
+            assertEquals(0, leInt(ico, p + 16), "frame " + i + " is BI_RGB, never PNG-compressed");
+
+            // The pixels: bottom-up BGRA rows of the brand-colored mark.
+            int maskRow = (s + 31) / 32 * 4;
+            int brand = AppIcon.BRAND.getRGB() & 0xFFFFFF;
+            int ink = 0;
+            int wrongColor = 0;
+            for (int y = 0; y < s; y++) {
+                for (int x = 0; x < s; x++) {
+                    int q = p + 40 + ((s - 1 - y) * s + x) * 4;
+                    int b = ico[q] & 0xFF, g = ico[q + 1] & 0xFF, r = ico[q + 2] & 0xFF;
+                    int a = ico[q + 3] & 0xFF;
+                    if (a > 0) {
+                        ink++;
+                        if (a > 32) {
+                            int dr = Math.abs(r - ((brand >> 16) & 0xFF));
+                            int dg = Math.abs(g - ((brand >> 8) & 0xFF));
+                            int db = Math.abs(b - (brand & 0xFF));
+                            if (Math.max(dr, Math.max(dg, db)) > 12) wrongColor++;
+                        }
+                    }
+                }
+            }
+            assertTrue(ink > s * s / 16, s + "px frame carries ink, got " + ink);
+            assertEquals(0, wrongColor, s + "px frame is the accent color in BGRA");
+            // The AND mask exists and is all zeros: alpha alone governs.
+            int mask = p + 40 + s * s * 4;
+            for (int q = mask; q < frameOffset[i] + frameSize[i]; q++) {
+                assertEquals(0, ico[q] & 0xFF, "AND mask byte " + (q - mask) + " of frame " + i);
+            }
         }
+    }
+
+    private static int leShort(byte[] buf, int off) {
+        return (buf[off] & 0xFF) | ((buf[off + 1] & 0xFF) << 8);
+    }
+
+    private static int leInt(byte[] buf, int off) {
+        return (buf[off] & 0xFF) | ((buf[off + 1] & 0xFF) << 8)
+                | ((buf[off + 2] & 0xFF) << 16) | ((buf[off + 3] & 0xFF) << 24);
     }
 
     @Test
