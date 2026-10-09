@@ -316,6 +316,66 @@ class SpeedSearchTest {
     }
 
     @Test
+    void arrowsHopBetweenMatchesAndKeepTheSearchOpen() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()), "gamma.md");
+        assertEquals("1/2", onEdt(pane::searchCountTextForTest));
+
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_DOWN));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "readme.md");
+        assertTrue(pane.searchActiveForTest(), "the search stays open");
+        assertEquals("md", pane.searchQueryForTest());
+        assertEquals("2/2", onEdt(pane::searchCountTextForTest));
+
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_DOWN));
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()), "wraps to gamma.md");
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_UP));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "wraps back up");
+    }
+
+    @Test
+    void theArrowBindingsHopTooWhileSearching() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        onEdt(() -> pane.fireTableActionForTest("DOWN"));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()));
+        onEdt(() -> pane.fireTableActionForTest("UP"));
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()));
+        assertTrue(pane.searchActiveForTest());
+    }
+
+    @Test
+    void withoutAQueryTheArrowsWalkEveryRow() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.table().setRowSelectionInterval(2, 2));
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));   // open, nothing typed
+        onEdt(() -> pane.fireTableActionForTest("DOWN"));
+        assertEquals(3, onEdt(() -> pane.table().getSelectedRow()), "one row down, as usual");
+        assertTrue(pane.searchActiveForTest(), "the empty search stays open");
+    }
+
+    @Test
+    void arrowsWithNothingToHopToStayPut() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.table().setRowSelectionInterval(2, 2));
+        onEdt(() -> pane.typeForTest("qx"));
+        assertTrue(pane.searchNoMatchForTest());
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_DOWN));
+        assertEquals(2, onEdt(() -> pane.table().getSelectedRow()));
+        assertTrue(pane.searchActiveForTest());
+        assertEquals("no matches", onEdt(pane::searchCountTextForTest));
+    }
+
+    @Test
+    void theCountReadsAsATotalOffAMatch() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        onEdt(() -> pane.table().setRowSelectionInterval(1, 1));   // beta, not a match
+        assertEquals("2 matches", onEdt(pane::searchCountTextForTest));
+    }
+
+    @Test
     void theNameCellsLearnWhatToHighlight() {
         FilePane pane = paneReady(6);
         onEdt(() -> pane.typeForTest("md"));

@@ -620,9 +620,20 @@ public final class FilePane extends JPanel {
         // real entry instead (the same row every keyboard landing picks).
         // ".." stays reachable with arrow-up, and a directory holding nothing
         // else still selects it.
+        // While a speed search has a query, both arrows hop between its
+        // matches instead (the key path catches them first; the bindings
+        // route here too, so either order lands the same).
         javax.swing.Action stockNextRow = tam.get("selectNextRow");
+        javax.swing.Action stockPrevRow = tam.get("selectPreviousRow");
+        tam.put("selectPreviousRow", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (speed.step(-1)) return;
+                stockPrevRow.actionPerformed(e);
+            }
+        });
         tam.put("selectNextRow", new AbstractAction() {
             @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (speed.step(1)) return;
                 int first = table.getSelectedRow() < 0 ? firstRealRow() : -1;
                 if (first > 0) {
                     table.changeSelection(first, 0, false, false);
@@ -1478,6 +1489,7 @@ public final class FilePane extends JPanel {
     public String searchQueryForTest() { return speed.query(); }
     public boolean searchNoMatchForTest() { return speed.noMatch(); }
     public int searchMatchCountForTest() { return speed.matchCount(); }
+    public String searchCountTextForTest() { return speed.countText(); }
     /** Where the badge paints, in pane coordinates; null while hidden. */
     public java.awt.Rectangle searchBadgeBoundsForTest() { return speed.badgeBounds(listArea()); }
     /** The rows' viewport in pane coordinates. */

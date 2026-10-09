@@ -24,8 +24,10 @@ import javax.swing.UIManager;
  * started, Enter commits and performs the normal open action. Ctrl+F
  * (Cmd+F on a Mac) opens an empty search for those who look for a key
  * rather than just typing. While a search runs, every row's matching
- * letters are highlighted (the browser's find-in-page cue) and the badge
- * — centered over the top of the list — counts the matching rows.
+ * letters are highlighted (the browser's find-in-page cue), the badge
+ * — centered over the top of the list — counts the matching rows, and the
+ * Up/Down arrows hop between the matches (wrapping) instead of walking
+ * every row, the search staying open.
  *
  * <p>Printable characters have no InputMap entries anywhere, so they are
  * intercepted in the table's {@code processKeyEvent}. Backspace / Enter /
@@ -77,10 +79,19 @@ final class SpeedSearch {
             return false;
         }
         if (e.getID() == KeyEvent.KEY_PRESSED && active) {
+            boolean plain = (e.getModifiersEx() & (KeyEvent.SHIFT_DOWN_MASK
+                    | KeyEvent.CTRL_DOWN_MASK | KeyEvent.ALT_DOWN_MASK
+                    | KeyEvent.META_DOWN_MASK)) == 0;
             switch (e.getKeyCode()) {
                 case KeyEvent.VK_BACK_SPACE -> { backspace(null); e.consume(); return true; }
                 case KeyEvent.VK_ESCAPE -> { escape(); e.consume(); return true; }
                 case KeyEvent.VK_ENTER -> { commit(); e.consume(); return true; }
+                case KeyEvent.VK_UP, KeyEvent.VK_KP_UP -> {
+                    if (plain && step(-1)) { e.consume(); return true; }
+                }
+                case KeyEvent.VK_DOWN, KeyEvent.VK_KP_DOWN -> {
+                    if (plain && step(1)) { e.consume(); return true; }
+                }
                 default -> { }
             }
         }
@@ -136,6 +147,34 @@ final class SpeedSearch {
         noMatch = false;
         preSearchRows = table.getSelectedRows().clone();
         changed();
+    }
+
+    /**
+     * The arrows while a query runs: selects the next ({@code dir} 1) or
+     * previous (-1) matching row, wrapping around the listing; the search
+     * stays open. False without a query — the arrows then move as usual.
+     */
+    boolean step(int dir) {
+        String needle = needle();
+        if (needle == null) return false;
+        int n = table.getRowCount();
+        int cur = table.getSelectedRow();
+        int base = cur >= 0 ? cur : dir > 0 ? -1 : n;
+        FileTableModel model = (FileTableModel) table.getModel();
+        for (int i = 1; i <= n; i++) {
+            int r = Math.floorMod(base + dir * i, n);
+            if (model.row(r).equals(dock.core.fs.FileEntry.PARENT)) continue;
+            if (matchIndex(r, needle) >= 0) {
+                table.setRowSelectionInterval(r, r);
+                table.scrollRectToVisible(table.getCellRect(r, 0, true));
+                noMatch = false;
+                changed();
+                return true;
+            }
+        }
+        noMatch = true;   // nothing to hop to: stay put, still searching
+        changed();
+        return true;
     }
 
     /** Escape reverts the selection to where the search started. */
@@ -297,10 +336,32 @@ final class SpeedSearch {
         return query.isEmpty() ? "Type to search" : query.toString();
     }
 
-    private String countText() {
+    /** "2/5" while the selection sits on a match (the arrows' position),
+     *  else how many rows match. */
+    String countText() {
         if (query.isEmpty()) return "";
         int n = matchCount();
-        return n == 0 ? "no matches" : n == 1 ? "1 match" : n + " matches";
+        if (n == 0) return "no matches";
+        int at = matchPosition();
+        if (at > 0) return at + "/" + n;
+        return n == 1 ? "1 match" : n + " matches";
+    }
+
+    /** 1-based place of the selected row among the matches; 0 when the
+     *  selection is not on one. */
+    private int matchPosition() {
+        String needle = needle();
+        int sel = table.getSelectedRow();
+        if (needle == null || sel < 0) return 0;
+        FileTableModel model = (FileTableModel) table.getModel();
+        if (model.row(sel).equals(dock.core.fs.FileEntry.PARENT)
+                || matchIndex(sel, needle) < 0) return 0;
+        int at = 0;
+        for (int r = 0; r <= sel; r++) {
+            if (!model.row(r).equals(dock.core.fs.FileEntry.PARENT)
+                    && matchIndex(r, needle) >= 0) at++;
+        }
+        return at;
     }
 
     /** Floating query badge over the top of the file list. */
