@@ -375,6 +375,90 @@ class SpeedSearchTest {
         assertEquals("2 matches", onEdt(pane::searchCountTextForTest));
     }
 
+    /** Fires the search box's own binding for a key (the caret-in-box path). */
+    private static void fieldKey(FilePane pane, String spec) {
+        onEdt(() -> {
+            var f = pane.searchFieldForTest();
+            Object name = f.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
+                    .get(javax.swing.KeyStroke.getKeyStroke(spec));
+            f.getActionMap().get(name).actionPerformed(
+                    new java.awt.event.ActionEvent(f, 0, "test"));
+        });
+    }
+
+    @Test
+    void theBoxIsWideEnoughToReadAQuery() {
+        FilePane pane = paneReady(6);
+        pane.setSize(760, 480);
+        onEdt(() -> layoutAll(pane));
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        assertTrue(onEdt(pane::searchBadgeBoundsForTest).width >= 340,
+                "box " + onEdt(pane::searchBadgeBoundsForTest));
+    }
+
+    @Test
+    void typingIntoTheTableFillsTheBox() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("re"));
+        assertEquals("re", onEdt(() -> pane.searchFieldForTest().getText()));
+    }
+
+    @Test
+    void aPasteIntoTheBoxSearches() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        onEdt(() -> pane.searchFieldForTest().replaceSelection("gam"));
+        assertEquals("gam", pane.searchQueryForTest());
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()), "gamma.md");
+        onEdt(() -> pane.searchFieldForTest().replaceSelection("ma"));
+        assertEquals("gamma", pane.searchQueryForTest(), "typing on after the paste");
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()));
+    }
+
+    @Test
+    void editingInsideTheBoxRematches() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("gamma"));
+        onEdt(() -> pane.searchFieldForTest().setText("readme"));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "readme.md");
+        assertTrue(pane.searchActiveForTest());
+    }
+
+    @Test
+    void backspaceInAnEmptyBoxClosesTheSearch() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        fieldKey(pane, "BACK_SPACE");
+        assertFalse(pane.searchActiveForTest());
+        assertEquals(null, onEdt(pane::searchBadgeBoundsForTest), "the box hides");
+    }
+
+    @Test
+    void backspaceInTheBoxDeletesWhileThereIsText() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("re"));
+        onEdt(() -> pane.searchFieldForTest().setCaretPosition(2));
+        fieldKey(pane, "BACK_SPACE");
+        assertEquals("r", pane.searchQueryForTest());
+        assertTrue(pane.searchActiveForTest());
+    }
+
+    @Test
+    void enterAndArrowsDriveTheSearchFromInsideTheBox() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        fieldKey(pane, "DOWN");
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "hops to readme.md");
+        fieldKey(pane, "UP");
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()));
+        fieldKey(pane, "ESCAPE");
+        assertFalse(pane.searchActiveForTest());
+
+        onEdt(() -> pane.typeForTest("be"));
+        fieldKey(pane, "ENTER");
+        await(() -> pane.path().equals("/home/user/beta"));
+    }
+
     @Test
     void theNameCellsLearnWhatToHighlight() {
         FilePane pane = paneReady(6);
