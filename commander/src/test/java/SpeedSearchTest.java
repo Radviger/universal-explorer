@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -457,6 +458,33 @@ class SpeedSearchTest {
         onEdt(() -> pane.typeForTest("be"));
         fieldKey(pane, "ENTER");
         await(() -> pane.path().equals("/home/user/beta"));
+    }
+
+    @Test
+    void theTableCountsTheSearchBoxAsItsOwnFocus() {
+        FilePane pane = paneReady(6);
+        assertTrue(onEdt(() -> pane.table().getClientProperty("JComponent.focusOwner"))
+                instanceof java.util.function.Predicate<?>,
+                "FlatLaf asks the pane whether the table is focused");
+    }
+
+    @Test
+    void theSelectionKeepsItsFocusedColorWhileTheBoxIsFocusedAndDimsAfter() {
+        FilePane pane = paneReady(6);
+        java.awt.Color active = javax.swing.UIManager.getColor("Table.selectionBackground");
+        java.awt.Color inactive = javax.swing.UIManager.getColor("Table.selectionInactiveBackground");
+        // Nothing holds the focus here (no window), so the synced state is the
+        // unfocused one; a focus event on the box re-syncs either way.
+        onEdt(() -> pane.table().setSelectionBackground(active));
+        onEdt(() -> {
+            var f = pane.searchFieldForTest();
+            for (var l : f.getFocusListeners()) {
+                l.focusLost(new java.awt.event.FocusEvent(f, java.awt.event.FocusEvent.FOCUS_LOST));
+            }
+        });
+        onEdt(() -> { });   // the deferred re-sync
+        assertSame(inactive, onEdt(() -> pane.table().getSelectionBackground()),
+                "focus gone from both: the selection dims like any unfocused table");
     }
 
     @Test

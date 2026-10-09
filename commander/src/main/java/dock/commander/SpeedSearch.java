@@ -93,10 +93,19 @@ final class SpeedSearch {
             @Override public void changedUpdate(DocumentEvent e) { }
         });
         bindFieldKeys();
-        // The tile's edge turns accent while the caret is in the box.
+        // The tile's edge turns accent while the caret is in the box, and
+        // the table's selection keeps its focused color (see attach).
         field.addFocusListener(new java.awt.event.FocusAdapter() {
-            @Override public void focusGained(java.awt.event.FocusEvent e) { box.repaint(); }
-            @Override public void focusLost(java.awt.event.FocusEvent e) { box.repaint(); }
+            @Override public void focusGained(java.awt.event.FocusEvent e) {
+                box.repaint();
+                syncSelectionColors();
+            }
+            @Override public void focusLost(java.awt.event.FocusEvent e) {
+                box.repaint();
+                // After the focus has landed: on the table it repaints
+                // itself; anywhere else the selection must dim now.
+                java.awt.EventQueue.invokeLater(SpeedSearch.this::syncSelectionColors);
+            }
         });
         count.setFont(FontRegistry.ui(Tokens.ICON_SMALL));
         box.setVisible(false);
@@ -107,6 +116,34 @@ final class SpeedSearch {
         this.table = table;
         this.host = host;
         this.open = open;
+        // The box steers this table, so FlatLaf must not paint the table's
+        // selection in its unfocused color while the caret sits in the box.
+        table.putClientProperty("JComponent.focusOwner",
+                (java.util.function.Predicate<JComponent>) c -> listHasFocus());
+    }
+
+    /** True while the table or its search box holds the focus. */
+    private boolean listHasFocus() {
+        java.awt.Component owner = java.awt.KeyboardFocusManager
+                .getCurrentKeyboardFocusManager().getPermanentFocusOwner();
+        return owner != null && (owner == table || owner == field);
+    }
+
+    /**
+     * FlatLaf swaps the table's selection colors only on the table's own
+     * focus events; moves between the box and the rest of the window never
+     * reach it, so they are mirrored here — the same color objects FlatLaf
+     * compares by identity.
+     */
+    void syncSelectionColors() {
+        if (table == null) return;
+        boolean focused = listHasFocus();
+        Color bg = UIManager.getColor(focused ? "Table.selectionBackground"
+                : "Table.selectionInactiveBackground");
+        Color fg = UIManager.getColor(focused ? "Table.selectionForeground"
+                : "Table.selectionInactiveForeground");
+        if (bg != null) table.setSelectionBackground(bg);
+        if (fg != null) table.setSelectionForeground(fg);
     }
 
     /** The search box, for the pane to lay over its list. */
