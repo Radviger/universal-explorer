@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * into the remote listing (instead of leaving it on the tab strip) but
  * preselects nothing — scanning starts on the first arrow-down. LEFT/RIGHT
  * hop the keyboard between the panes — left is always local, right always
- * remote — the same way: focus moves, selections never do. Explorer mode
- * keeps the hidden local pane out of the hops.
+ * remote — the same way: focus moves, selections never do. A folded
+ * pane stays out of the hops.
  */
 class PaneFocusTest {
 
@@ -131,13 +131,13 @@ class PaneFocusTest {
     }
 
     @Test
-    void explorerModeKeepsTheHiddenPaneOutOfTheHops() throws Exception {
+    void hiddenPaneStaysOutOfTheHops() throws Exception {
         build(root -> Files.writeString(root.resolve("z.txt"), "x"));
         awaitListed(view.remotePane());
         EventQueue.invokeAndWait(() -> view.remotePane().fireTableActionForTest("DOWN"));
         assertEquals("z.txt", selectedName(view.remotePane()));
 
-        EventQueue.invokeAndWait(() -> view.setExplorerMode(true));
+        EventQueue.invokeAndWait(() -> view.setLocalPaneHidden(true));
         EventQueue.invokeAndWait(() -> view.remotePane().fireTableActionForTest("LEFT"));
         assertEquals("z.txt", selectedName(view.remotePane()),
                 "the visible pane keeps its cursor");

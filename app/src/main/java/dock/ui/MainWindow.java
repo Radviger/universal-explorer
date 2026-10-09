@@ -57,6 +57,9 @@ public final class MainWindow extends JFrame {
     private final StatusBar statusBar;
     private final TransferPopup transfers;
     private SessionsHome homeView;
+    /** The View-menu Explorer checkbox — synced with the footer's pane
+     *  buttons by {@link #syncPaneToggles()}. */
+    private JCheckBoxMenuItem explorerItem;
 
     public MainWindow() {
         super("Universal Explorer");
@@ -103,8 +106,10 @@ public final class MainWindow extends JFrame {
         center.add(home(), java.awt.BorderLayout.CENTER);
         add(center, BorderLayout.CENTER);
         statusBar = new StatusBar(dock.core.transfer.TransferEngine.GLOBAL, this::toggleTransfers);
+        statusBar.setPaneActions(this::toggleLocalPane, this::toggleRemotePane);
         add(statusBar, BorderLayout.SOUTH);
         transfers = new TransferPopup(this, dock.core.transfer.TransferEngine.GLOBAL, statusBar);
+        syncPaneToggles();
         setSize(1280, 800);
         setMinimumSize(new Dimension(960, 600));
         // Centered every launch: setLocationByPlatform let the OS place
@@ -177,6 +182,22 @@ public final class MainWindow extends JFrame {
     /** Toggles the transfers popup anchored above the footer bar. */
     public void toggleTransfers() {
         transfers.toggle();
+    }
+
+    /** The footer's edge buttons: fold one pane of the selected session
+     *  away — or bring it back. */
+    private void toggleLocalPane() {
+        if (tabs.getSelectedComponent() instanceof SessionTab view) {
+            view.setLocalPaneHidden(!view.localPaneHidden());
+            syncPaneToggles();
+        }
+    }
+
+    private void toggleRemotePane() {
+        if (tabs.getSelectedComponent() instanceof SessionTab view) {
+            view.setRemotePaneHidden(!view.remotePaneHidden());
+            syncPaneToggles();
+        }
     }
 
     /** The transfers popup (screenshot/selftest hook). */
@@ -487,7 +508,8 @@ public final class MainWindow extends JFrame {
         view.setMnemonic(KeyEvent.VK_V);
         view.add(item("Transfers", Glyphs.EXCHANGE, "ctrl alt Q", this::toggleTransfers));
         view.addSeparator();
-        view.add(explorerModeItem());
+        explorerItem = explorerModeItem();
+        view.add(explorerItem);
         view.addSeparator();
         view.add(hiddenFilesItem());
         view.add(dotFilesItem());
@@ -519,9 +541,10 @@ public final class MainWindow extends JFrame {
     }
 
     /**
-     * Commander/Explorer toggle for the selected session tab. The checkbox
-     * mirrors the tab's mode and follows tab selection; terminal tabs and
-     * the home screen disable it.
+     * Commander/Explorer toggle for the selected session tab — the local
+     * pane's visibility. The checkbox mirrors the tab's layout and
+     * follows tab selection; terminal tabs and the home screen disable
+     * it, and so does a folded remote pane (one pane must stay visible).
      */
     private JCheckBoxMenuItem explorerModeItem() {
         JCheckBoxMenuItem explorerMode = new JCheckBoxMenuItem("Explorer Mode",
@@ -530,19 +553,28 @@ public final class MainWindow extends JFrame {
         explorerMode.setAccelerator(KeyStroke.getKeyStroke("ctrl alt E"));
         explorerMode.addActionListener(e -> {
             if (tabs.getSelectedComponent() instanceof SessionTab view) {
-                view.setExplorerMode(explorerMode.getState());
+                view.setLocalPaneHidden(explorerMode.getState());
+                syncPaneToggles();
             }
         });
         // Selection drives everything: connect/close/select all move it.
-        tabs.addChangeListener(e -> syncExplorerModeItem(explorerMode));
+        tabs.addChangeListener(e -> syncPaneToggles());
         return explorerMode;
     }
 
-    private void syncExplorerModeItem(JCheckBoxMenuItem explorerMode) {
-        boolean isSession = tabs.getSelectedComponent() instanceof SessionTab;
-        explorerMode.setEnabled(isSession);
-        if (isSession) {
-            explorerMode.setState(((SessionTab) tabs.getSelectedComponent()).explorerMode());
+    /** One truth for pane visibility: the View-menu checkbox and the
+     *  footer's two edge buttons mirror the selected session together. */
+    private void syncPaneToggles() {
+        SessionTab tab = tabs.getSelectedComponent() instanceof SessionTab t ? t : null;
+        boolean isSession = tab != null;
+        boolean localHidden = isSession && tab.localPaneHidden();
+        boolean remoteHidden = isSession && tab.remotePaneHidden();
+        if (explorerItem != null) {
+            explorerItem.setEnabled(isSession && !remoteHidden);
+            explorerItem.setState(localHidden);
+        }
+        if (statusBar != null) {
+            statusBar.syncPaneToggles(isSession, localHidden, remoteHidden);
         }
     }
 

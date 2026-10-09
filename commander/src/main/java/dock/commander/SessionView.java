@@ -50,9 +50,16 @@ public final class SessionView extends javax.swing.JPanel
     private final FilePane remote;
     private FilePane lastActive;
     private final JSplitPane split;
-    /** Swaps between the commander split and the lone remote pane. */
+    /** Swaps between the commander split and the lone visible pane. */
     private final JPanel content = new JPanel(new BorderLayout());
-    private boolean explorer;
+    /** Pane visibility: a folded side leaves the display — the other
+     *  fills the window — but keeps its directory and any stand-in
+     *  covering it alive underneath. One side always stays visible. */
+    private boolean localHidden;
+    private boolean remoteHidden;
+    /** The divider's last standing position, restored when both sides
+     *  return after an excursion. */
+    private int lastDivider = -1;
     /** The image viewer currently replacing a pane, if any — the pane it
      *  covers stays alive underneath: its directory, stacks, and transfers
      *  (F5/F6 act on the last active pane) keep working while hidden. */
@@ -198,9 +205,8 @@ public final class SessionView extends javax.swing.JPanel
 
     /** Swaps {@code side} out for the in-pane image viewer on one file. */
     private void openViewer(FilePane side, String firstName) {
-        // Explorer mode never shows the local pane, so nothing can open a
-        // viewer on it there.
-        if (explorer && side == local) return;
+        // A folded side is off-screen; nothing can open a viewer on it.
+        if (sideHidden(side)) return;
         closeViewer(side);       // one stand-in per side, whichever kind
         closeEditor(side);
         ImageViewerPanel viewer = new ImageViewerPanel(side.fs(), side.path(), firstName,
@@ -229,7 +235,7 @@ public final class SessionView extends javax.swing.JPanel
     }
 
     private void openEditor(FilePane side, String name, boolean render) {
-        if (explorer && side == local) return;
+        if (sideHidden(side)) return;
         closeEditor(side);
         closeViewer(side);
         EditorPanel editor = new EditorPanel(side.fs(), side.path(), name, render,
@@ -255,7 +261,7 @@ public final class SessionView extends javax.swing.JPanel
 
     /** Swaps {@code side} out for the in-pane streaming player on one file. */
     private void openPlayer(FilePane side, String name) {
-        if (explorer && side == local) return;
+        if (sideHidden(side)) return;
         closePlayer(side);        // one stand-in per side, whichever kind
         closeViewer(side);
         closeEditor(side);
@@ -279,10 +285,12 @@ public final class SessionView extends javax.swing.JPanel
     }
 
     /** Seats a stand-in (or the pane itself back again) in {@code side}'s
-     *  slot: the commander split for one side, the lone center in Explorer
-     *  mode — where only the remote side and its stand-ins ever appear. */
+     *  slot: the commander split for one side, or the whole window while
+     *  the other side is folded away. A folded side's slot is off-screen,
+     *  so its swaps are bookkeeping — the display stands untouched. */
     private void mountStandin(FilePane side, java.awt.Component standin) {
-        if (explorer) {
+        if (sideHidden(side)) return;
+        if (localHidden || remoteHidden) {
             content.removeAll();
             content.add(standin, BorderLayout.CENTER);
         } else {
@@ -489,11 +497,11 @@ public final class SessionView extends javax.swing.JPanel
     }
 
     /** A LEFT/RIGHT hop moves the keyboard without selecting anything.
-     *  Explorer mode keeps the local pane off-screen, so hops onto it do
-     *  nothing. A side showing a stand-in takes the hop itself — the
-     *  table underneath it is hidden. */
+     *  A folded side is off-screen, so hops onto it do nothing. A side
+     *  showing a stand-in takes the hop itself — the table underneath
+     *  it is hidden. */
     private void hop(FilePane target) {
-        if (explorer && target == local) return;
+        if (sideHidden(target)) return;
         ImageViewerPanel viewer = target == local ? viewerLocal : viewerRemote;
         EditorPanel editor = target == local ? editorLocal : editorRemote;
         PlayerPanel player = target == local ? playerLocal : playerRemote;
@@ -578,38 +586,80 @@ public final class SessionView extends javax.swing.JPanel
         remote.applyViewSettings();
     }
 
-    /**
-     * Toggles Explorer (single-pane) mode. The local pane is only removed
-     * from the display: it stays alive with its directory, so transfers
-     * (F5/F6, drops) keep working against it and the commander layout
-     * restores exactly where it was.
-     */
-    @Override public void setExplorerMode(boolean on) {
-        if (explorer == on) return;
-        // The layout excursion closes any open stand-in; its pane returns
-        // to its slot in whichever shape the session takes next.
-        if (!confirmLosingEdits("Switching the layout closes the editor.")) return;
-        closeAllViewers();
-        explorer = on;
-        lastActive = remote;
-        content.removeAll();
-        if (on) {
-            content.add(remote, BorderLayout.CENTER);
+    // ---- pane visibility ----
+
+    /** Whether {@code side} is folded away — off-screen, but alive with
+     *  its directory and any stand-in covering it. */
+    private boolean sideHidden(FilePane side) {
+        return side == local ? localHidden : remoteHidden;
+    }
+
+    /** The side's current occupant: the stand-in covering it, or the pane. */
+    private java.awt.Component slot(FilePane side) {
+        if (side == local) {
+            if (viewerLocal != null) return viewerLocal;
+            if (editorLocal != null) return editorLocal;
+            if (playerLocal != null) return playerLocal;
         } else {
-            split.setRightComponent(remote);
+            if (viewerRemote != null) return viewerRemote;
+            if (editorRemote != null) return editorRemote;
+            if (playerRemote != null) return playerRemote;
+        }
+        return side;
+    }
+
+    /**
+     * Folds one pane away — or brings it back. The pane only leaves the
+     * display: it stays alive with its directory and any stand-in
+     * covering it, so transfers (F5/F6, drops) keep working against it
+     * and the commander layout restores exactly where it stood. One pane
+     * must stay visible; folding the last one is refused.
+     */
+    private void setPaneHidden(FilePane side, boolean hidden) {
+        if (sideHidden(side) == hidden) return;
+        if (hidden && sideHidden(side == local ? remote : local)) {
+            Toast.show(this, "The other pane is already hidden — show it first.",
+                    Glyphs.INFO);
+            return;
+        }
+        if (side == local) localHidden = hidden; else remoteHidden = hidden;
+        applyLayout();
+        // The keyboard follows the pane that stays on screen.
+        lastActive = remoteHidden ? local : remote;
+        hop(lastActive);
+    }
+
+    /** Seats each side's occupant in the shape the hidden flags pick:
+     *  both sides back in the commander split — the divider where it
+     *  stood — or the lone visible side filling the window. */
+    private void applyLayout() {
+        if (content.isAncestorOf(split) && split.getDividerLocation() > 0)
+            lastDivider = split.getDividerLocation();
+        content.removeAll();
+        if (localHidden || remoteHidden) {
+            content.add(slot(localHidden ? remote : local), BorderLayout.CENTER);
+        } else {
+            split.setLeftComponent(slot(local));
+            split.setRightComponent(slot(remote));
             content.add(split, BorderLayout.CENTER);
-            // The placement listener fired long ago; the split needs its
-            // divider re-centered after its excursion outside the tree.
+            // Re-seating the split's children arms its reset-to-preferred
+            // pass; re-asserting the remembered location lands the divider
+            // back where it stood (centered until one exists).
             SwingUtilities.invokeLater(() -> {
-                if (split.getWidth() > 0) split.setDividerLocation(0.5);
+                if (split.getWidth() > 0) {
+                    if (lastDivider > 0) split.setDividerLocation(lastDivider);
+                    else split.setDividerLocation(0.5);
+                }
             });
         }
         content.revalidate();
         content.repaint();
-        remote.table().requestFocusInWindow();
     }
 
-    public boolean explorerMode() { return explorer; }
+    @Override public void setLocalPaneHidden(boolean hidden) { setPaneHidden(local, hidden); }
+    @Override public void setRemotePaneHidden(boolean hidden) { setPaneHidden(remote, hidden); }
+    @Override public boolean localPaneHidden() { return localHidden; }
+    @Override public boolean remotePaneHidden() { return remoteHidden; }
 
     /**
      * Attaches the saved session this view belongs to: both panes reopen

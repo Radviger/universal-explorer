@@ -28,7 +28,7 @@ spreading to other desktops is part of the point.
 
 ## Features
 
-- **Dual-pane Commander**, switchable at runtime to a single-pane Explorer layout — the same session, two ways of working.
+- **Dual-pane Commander**, switchable at runtime to a single-pane Explorer layout — the same session, two ways of working. Either pane folds away from the footer bar, so a viewer, editor, or player can take the whole window.
 - **Five protocols in one shell**: SFTP (with SSH agent and key support), SMB shares, WebDAV, FTP, and S3-compatible object storage (AWS, MinIO, R2, Wasabi…) with buckets as the virtual root. New protocols drop in as modules behind an SPI — the shell never links them directly.
 - **Session tabs** with per-site memory: every session reopens exactly where its panes last stood, local and remote.
 - **Background transfer queue** — copies and moves keep running while you browse.

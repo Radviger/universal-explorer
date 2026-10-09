@@ -42,6 +42,13 @@ public final class StatusBar extends JPanel {
     private final JLabel activitySpeed = new JLabel();
     private final JProgressBar progress = new JProgressBar();
     private final JLabel hoverInfo = new JLabel();
+    /** The shell's pane toggles, attached once the window is assembled. */
+    private Runnable toggleLocalPane;
+    private Runnable toggleRemotePane;
+    /** The footer's west edge: folds the local pane away — or back. */
+    private final JButton localPaneButton = paneButton(() -> toggleLocalPane);
+    /** The footer's east edge: the same fold for the remote pane. */
+    private final JButton remotePaneButton = paneButton(() -> toggleRemotePane);
 
     /** Shows the status line's hover text while any is published; file
      *  facts read in the mono font, sentences in the UI font. */
@@ -70,6 +77,10 @@ public final class StatusBar extends JPanel {
         hoverInfo.setFont(FontRegistry.ui());
         hoverInfo.setForeground(UIManager.getColor("Label.foreground"));
         hoverInfo.setVisible(false);
+        // The pane toggle sits at the very west edge, before the hover
+        // line: the button owns the corner, the reading comes after.
+        left.add(localPaneButton);
+        left.add(Box.createHorizontalStrut(Tokens.GAP_1));
         left.add(hoverInfo);
         StatusLine.addListener(hoverListener);
 
@@ -119,6 +130,8 @@ public final class StatusBar extends JPanel {
         right.add(verticalSeparator());
         right.add(Box.createHorizontalStrut(Tokens.GAP_2));
         right.add(themeButton());
+        right.add(Box.createHorizontalStrut(Tokens.GAP_2));
+        right.add(remotePaneButton);
 
         add(left, BorderLayout.WEST);
         add(right, BorderLayout.EAST);
@@ -198,6 +211,12 @@ public final class StatusBar extends JPanel {
     public int progressValueForTest() { return onEdt(progress::getValue); }
     public boolean progressIndeterminateForTest() { return onEdt(progress::isIndeterminate); }
 
+    /** The footer's west-edge pane toggle (tests). */
+    public JButton localPaneButtonForTest() { return localPaneButton; }
+
+    /** The footer's east-edge pane toggle (tests). */
+    public JButton remotePaneButtonForTest() { return remotePaneButton; }
+
     private static void onEdt(Runnable r) {
         try {
             EventQueue.invokeAndWait(r);
@@ -210,6 +229,52 @@ public final class StatusBar extends JPanel {
         AtomicReference<T> out = new AtomicReference<>();
         onEdt(() -> out.set(read.get()));
         return out.get();
+    }
+
+    /** Wires the two edge buttons to the shell's toggles; they stay
+     *  disabled until {@link #syncPaneToggles} reports a session under
+     *  them. */
+    public void setPaneActions(Runnable toggleLocalPane, Runnable toggleRemotePane) {
+        this.toggleLocalPane = toggleLocalPane;
+        this.toggleRemotePane = toggleRemotePane;
+    }
+
+    /** Mirrors the selected session's pane visibility: accented ink while
+     *  a pane is folded away, and a button rests while the other pane is
+     *  hidden — one pane must stay on screen. */
+    public void syncPaneToggles(boolean sessionActive, boolean localHidden,
+                                boolean remoteHidden) {
+        localPaneButton.setEnabled(sessionActive && !remoteHidden);
+        remotePaneButton.setEnabled(sessionActive && !localHidden);
+        localPaneButton.setIcon(Glyphs.icon(Glyphs.COLUMNS, Tokens.ICON_SMALL,
+                localHidden ? accent() : StatusBar::muted));
+        localPaneButton.setToolTipText(
+                localHidden ? "Show the local pane" : "Hide the local pane");
+        remotePaneButton.setIcon(Glyphs.icon(Glyphs.COLUMNS, Tokens.ICON_SMALL,
+                remoteHidden ? accent() : StatusBar::muted));
+        remotePaneButton.setToolTipText(
+                remoteHidden ? "Show the remote pane" : "Hide the remote pane");
+    }
+
+    /** One of the footer's edge buttons: the columns glyph, muted while
+     *  the pane shows and accented while it is folded away. Inert until
+     *  the shell wires and syncs it. */
+    private static JButton paneButton(java.util.function.Supplier<Runnable> action) {
+        JButton b = new JButton(
+                Glyphs.icon(Glyphs.COLUMNS, Tokens.ICON_SMALL, StatusBar::muted));
+        b.setToolTipText("Hide the pane");
+        b.putClientProperty("JButton.buttonType", "borderless");
+        b.setRolloverEnabled(true);
+        b.setEnabled(false);
+        b.addActionListener(e -> {
+            Runnable r = action.get();
+            if (r != null) r.run();
+        });
+        return b;
+    }
+
+    private static java.util.function.Supplier<Color> accent() {
+        return () -> UIManager.getColor("Dock.accent");
     }
 
     private JButton themeButton() {

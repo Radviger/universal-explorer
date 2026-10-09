@@ -4,6 +4,7 @@ import java.awt.Component;
 import java.awt.EventQueue;
 import java.awt.Window;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
@@ -16,10 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Explorer mode: the View-menu checkbox swaps the selected session between
- * the commander split and a lone remote pane. The local pane is only removed
- * from the display (it keeps its directory so transfers still target it),
- * and switching back restores the split with a re-centered divider.
+ * Pane visibility: the View-menu checkbox and the footer's two edge
+ * buttons fold either pane of the selected session away — the other fills
+ * the window. A folded pane is only removed from the display (it keeps
+ * its directory so transfers still target it), and switching back
+ * restores the split with the divider where it stood.
  */
 class ExplorerModeTest {
 
@@ -31,7 +33,7 @@ class ExplorerModeTest {
     }
 
     @Test
-    void explorerModeSwapsLayoutAndMenuFlipsIt() throws Exception {
+    void paneHidingSwapsLayoutAndControlsFlipIt() throws Exception {
         try (dock.sftp.DemoServer.Handle demo = dock.sftp.DemoServer.start()) {
             var fs = dock.sftp.SshSessions.connect("demo", "127.0.0.1", demo.port(),
                     "demo".toCharArray(), null, null,
@@ -58,27 +60,53 @@ class ExplorerModeTest {
                     await(() -> local.getWidth() > 400 && remote.getWidth() > 400,
                             "commander panes laid out");
                     assertTrue(remote.getX() > local.getX(), "remote sits right of local");
-                    assertFalse(view.explorerMode());
+                    assertFalse(view.localPaneHidden());
                     assertTrue(item.isEnabled(), "menu item enabled with a session open");
                     assertFalse(item.getState());
 
                     // On: remote alone fills the width; the local pane is out
                     // of the window but alive (still parented inside the split).
                     EventQueue.invokeAndWait(item::doClick);
-                    assertTrue(view.explorerMode());
+                    assertTrue(view.localPaneHidden());
                     await(() -> remote.getWidth() > 1100, "remote fills the window");
                     assertFalse(SwingUtilities.isDescendingFrom(local, w.get()),
                             "local pane detached from the window");
                     assertTrue(local.getParent() != null, "local pane still alive");
                     assertTrue(item.getState(), "checkbox follows the mode");
 
-                    // Off: back to side-by-side with the divider re-centered.
+                    // Off: back to side-by-side with the divider where it stood.
                     EventQueue.invokeAndWait(item::doClick);
-                    assertFalse(view.explorerMode());
+                    assertFalse(view.localPaneHidden());
                     await(() -> SwingUtilities.isDescendingFrom(local, w.get())
                             && local.getWidth() > 400 && remote.getWidth() > 400,
                             "commander restored");
                     assertFalse(item.getState());
+
+                    // The footer's edge buttons fold either pane: the right
+                    // one takes the remote side away, and while only one
+                    // pane can fold, the left button rests.
+                    dock.ui.StatusBar footer = findStatusBar(w.get());
+                    JButton rightPane = footer.remotePaneButtonForTest();
+                    JButton leftPane = footer.localPaneButtonForTest();
+                    EventQueue.invokeAndWait(rightPane::doClick);
+                    assertTrue(view.remotePaneHidden());
+                    await(() -> local.getWidth() > 1100, "local fills the window");
+                    assertFalse(SwingUtilities.isDescendingFrom(remote, w.get()),
+                            "remote pane detached from the window");
+                    assertFalse(leftPane.isEnabled(), "the last visible pane cannot fold");
+                    assertFalse(item.isEnabled(), "the menu agrees");
+                    EventQueue.invokeAndWait(rightPane::doClick);
+                    assertFalse(view.remotePaneHidden());
+                    await(() -> local.getWidth() > 400 && remote.getWidth() > 400,
+                            "commander restored from the footer");
+
+                    // The footer's left button mirrors the Explorer-mode
+                    // menu: same toggle, same checkbox.
+                    EventQueue.invokeAndWait(leftPane::doClick);
+                    assertTrue(view.localPaneHidden());
+                    assertTrue(item.getState(), "checkbox follows the footer button");
+                    EventQueue.invokeAndWait(leftPane::doClick);
+                    assertFalse(view.localPaneHidden());
                 } finally {
                     EventQueue.invokeAndWait(w.get()::dispose);
                 }
@@ -98,6 +126,16 @@ class ExplorerModeTest {
         dock.commander.SessionView v = found.get();
         assertTrue(v != null, "a session tab must exist inside the window");
         return v;
+    }
+
+    private static dock.ui.StatusBar findStatusBar(Window window) {
+        var found = new AtomicReference<dock.ui.StatusBar>();
+        walk(window, c -> {
+            if (c instanceof dock.ui.StatusBar b && found.get() == null) found.set(b);
+        });
+        dock.ui.StatusBar b = found.get();
+        assertTrue(b != null, "the footer must exist inside the window");
+        return b;
     }
 
     private static JCheckBoxMenuItem findExplorerItem(JFrame frame) {

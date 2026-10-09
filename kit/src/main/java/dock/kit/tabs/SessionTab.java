@@ -16,9 +16,17 @@ public interface SessionTab {
     /** Re-reads pane listings after transfers touched them. */
     void refreshAfterTransfers();
 
-    boolean explorerMode();
+    /** Whether the local pane is folded away (the Explorer layout). */
+    boolean localPaneHidden();
 
-    void setExplorerMode(boolean on);
+    /** Folds the local pane away — or seats it back in the split. */
+    void setLocalPaneHidden(boolean hidden);
+
+    /** Whether the remote pane is folded away. */
+    boolean remotePaneHidden();
+
+    /** Folds the remote pane away — or seats it back in the split. */
+    void setRemotePaneHidden(boolean hidden);
 
     /** Pushes View-menu settings (hidden files, dot-prefix rule) in. */
     void applyViewSettings();

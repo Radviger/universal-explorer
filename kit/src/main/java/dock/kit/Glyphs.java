@@ -77,6 +77,9 @@ public final class Glyphs {
     public static final String EXCHANGE        = "\uF0EC";
     public static final String EYE             = "\uF06E";
     public static final String ELLIPSIS        = "\uF141";
+    /** nf-fa-columns, U+F0DB — two panes split by the divider between
+     *  them; the footer's pane-visibility toggles. */
+    public static final String COLUMNS         = "\uF0DB";
     /** nf-fa-copy, U+F0C5 — two overlapping pages; the code card's copy. */
     public static final String COPY            = "\uF0C5";
     /** nf-fa-clipboard, U+F0EA — the clipboard board: paste. */
