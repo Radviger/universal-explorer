@@ -211,8 +211,12 @@ public final class FileTableModel extends AbstractTableModel {
 
         /**
          * The browser's find-in-page cue: a marker behind the matching
-         * letters, painted under the text. The background is filled here
-         * first, so the label paints transparent over the marker.
+         * letters, painted under the text. The background (when the cell
+         * paints one) and the marker go first; then the label UI's paint
+         * draws icon and text alone — its update() step, the background
+         * fill, is skipped. Never toggle setOpaque here: this renderer's
+         * isOpaque() is computed per cell, so a "restore" would pin the
+         * flag off and the column would stop painting selection and stripes.
          */
         @Override protected void paintComponent(java.awt.Graphics g) {
             Rectangle hit = hitStart < 0 ? null : hitRect(g);
@@ -220,23 +224,25 @@ public final class FileTableModel extends AbstractTableModel {
                 super.paintComponent(g);
                 return;
             }
-            boolean opaque = isOpaque();
-            if (opaque) {
-                g.setColor(getBackground());
-                g.fillRect(0, 0, getWidth(), getHeight());
-            }
             java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
-            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-            Color mark = UIManager.getColor("Dock.searchHit");
-            g2.setColor(mark != null ? mark : new Color(0xE0, 0xAF, 0x68, 0x70));
-            g2.fillRoundRect(hit.x, hit.y, hit.width, hit.height, 4, 4);
-            g2.dispose();
-            setOpaque(false);
             try {
-                super.paintComponent(g);
+                if (isOpaque()) {
+                    g2.setColor(getBackground());
+                    g2.fillRect(0, 0, getWidth(), getHeight());
+                }
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                Color mark = UIManager.getColor("Dock.searchHit");
+                g2.setColor(mark != null ? mark : new Color(0xE0, 0xAF, 0x68, 0x70));
+                g2.fillRoundRect(hit.x, hit.y, hit.width, hit.height, 4, 4);
             } finally {
-                setOpaque(opaque);
+                g2.dispose();
+            }
+            java.awt.Graphics text = g.create();
+            try {
+                getUI().paint(text, this);
+            } finally {
+                text.dispose();
             }
         }
 

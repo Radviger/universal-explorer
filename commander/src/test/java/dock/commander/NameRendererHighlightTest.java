@@ -112,6 +112,45 @@ class NameRendererHighlightTest {
     }
 
     @Test
+    void aSelectedRowStillPaintsItsSelectionAfterAHighlight() throws Exception {
+        var color = new AtomicReference<Integer>();
+        var expected = new AtomicReference<Integer>();
+        EventQueue.invokeAndWait(() -> {
+            // One renderer serves every row, as in the real table: a marked,
+            // unselected row first, then the selected row without a search.
+            var r = new FileTableModel.NameRenderer();
+            JTable searching = table("test2");
+            paintCell(r, searching, 0, false);   // ".." — a plain row, table background
+            paintCell(r, searching, 2, false);   // a marked plain row
+            JTable quiet = table(null);
+            quiet.setRowSelectionInterval(4, 4);
+            BufferedImage img = paintCell(r, quiet, 4, true);
+            color.set(img.getRGB(img.getWidth() - 4, 2) & 0xFFFFFF);
+            expected.set(quiet.getSelectionBackground().getRGB() & 0xFFFFFF);
+        });
+        assertEquals(Integer.toHexString(expected.get()), Integer.toHexString(color.get()),
+                "the name cell keeps painting the selection after a search");
+    }
+
+    private static BufferedImage paintCell(FileTableModel.NameRenderer r, JTable table,
+                                           int row, boolean selected) {
+        var c = (JComponent) r.getTableCellRendererComponent(table, ENTRIES.get(row).name(),
+                selected, false, row, 0);
+        // Seated the way JTable paints cells — inside a CellRendererPane on
+        // the table — so the renderer's opacity sees the table's background.
+        javax.swing.CellRendererPane seat = new javax.swing.CellRendererPane();
+        table.add(seat);
+        seat.add(c);
+        c.setSize(300, 24);
+        c.doLayout();
+        BufferedImage img = new BufferedImage(300, 24, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        c.paint(g);
+        g.dispose();
+        return img;
+    }
+
+    @Test
     void aMatchElidedOutOfAThinColumnPaintsNoMark() throws Exception {
         assertEquals(0, diff(paint(null, 2, 70), paint("2.2", 2, 70)),
                 "the hit sits past the '...' — nothing to mark");
