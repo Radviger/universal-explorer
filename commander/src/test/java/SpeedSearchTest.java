@@ -250,10 +250,10 @@ class SpeedSearchTest {
     }
 
     @Test
-    void badgePaintsInLowerLeftOfFileArea() {
+    void badgeSitsCenteredOverTheTopOfTheList() {
         FilePane pane = paneReady(6);
-        // Pre-select the row the search will land on, so the only pixel
-        // difference while searching is the badge itself.
+        // Pre-select the row the search will land on, so the pixel changes
+        // while searching are the badge and the name highlight.
         onEdt(() -> pane.table().setRowSelectionInterval(5, 5));
         pane.setSize(760, 480);
         onEdt(() -> layoutAll(pane));
@@ -262,33 +262,69 @@ class SpeedSearchTest {
         onEdt(() -> pane.typeForTest("re"));
         BufferedImage after = render(pane);
 
-        int[] minX = {Integer.MAX_VALUE};
-        int[] minY = {Integer.MAX_VALUE};
-        int[] count = {0};
-        for (int y = 0; y < before.getHeight(); y++) {
-            for (int x = 0; x < before.getWidth(); x++) {
-                if (before.getRGB(x, y) != after.getRGB(x, y)) {
-                    count[0]++;
-                    minX[0] = Math.min(minX[0], x);
-                    minY[0] = Math.min(minY[0], y);
-                }
-            }
-        }
-        assertTrue(count[0] > 200, "badge must paint pixels, changed " + count[0]);
-        assertTrue(minY[0] > after.getHeight() * 0.6,
-                "badge sits at the bottom, topmost change at y=" + minY[0]);
-        assertTrue(minX[0] < after.getWidth() / 2,
-                "badge sits at the left, leftmost change at x=" + minX[0]);
+        java.awt.Rectangle badge = onEdt(pane::searchBadgeBoundsForTest);
+        java.awt.Rectangle list = onEdt(pane::listAreaForTest);
+        assertTrue(Math.abs(badge.getCenterX() - list.getCenterX()) <= 1,
+                "centered across the list: badge " + badge + " list " + list);
+        assertTrue(badge.y >= list.y && badge.y <= list.y + 12,
+                "just below the column headers: badge " + badge + " list " + list);
+        assertTrue(changedPixels(before, after, badge) > 200, "the badge paints");
 
         onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        assertEquals(null, onEdt(pane::searchBadgeBoundsForTest));
         BufferedImage reverted = render(pane);
-        int changed = 0;
-        for (int y = 0; y < before.getHeight(); y++) {
-            for (int x = 0; x < before.getWidth(); x++) {
-                if (before.getRGB(x, y) != reverted.getRGB(x, y)) changed++;
-            }
-        }
-        assertEquals(0, changed, "Escape restores the pre-search pixels");
+        assertEquals(0, changedPixels(before, reverted,
+                new java.awt.Rectangle(0, 0, before.getWidth(), before.getHeight())),
+                "Escape restores the pre-search pixels, highlight included");
+    }
+
+    @Test
+    void ctrlOrCmdFOpensAnEmptySearchThatTypingFills() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        assertTrue(pane.searchActiveForTest(), "the hotkey opens the search");
+        assertEquals("", pane.searchQueryForTest());
+        assertTrue(onEdt(pane::searchBadgeBoundsForTest) != null, "the badge shows at once");
+
+        onEdt(() -> pane.typeForTest("re"));
+        assertEquals("re", pane.searchQueryForTest());
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "readme.md");
+
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        onEdt(() -> pane.fireTableActionForTest("meta F"));
+        assertTrue(pane.searchActiveForTest(), "Cmd+F is the Mac spelling");
+    }
+
+    @Test
+    void backspaceClosesAnEmptySearchWithoutLeavingTheFolder() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        onEdt(() -> pane.fireTableActionForTest("BACK_SPACE"));
+        assertFalse(pane.searchActiveForTest());
+        assertEquals("/home/user", pane.path(), "closing the search is not navigation");
+    }
+
+    @Test
+    void theBadgeCountsEveryRowHoldingTheQuery() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        assertEquals(2, onEdt(pane::searchMatchCountForTest), "gamma.md and readme.md");
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        onEdt(() -> pane.typeForTest("."));
+        assertEquals(4, onEdt(pane::searchMatchCountForTest),
+                "every dotted file, never the '..' shortcut");
+    }
+
+    @Test
+    void theNameCellsLearnWhatToHighlight() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        assertEquals("md", onEdt(() -> pane.table().getClientProperty("dock.speedSearch.needle")));
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        assertEquals(null, onEdt(() -> pane.table().getClientProperty("dock.speedSearch.needle")));
+        onEdt(() -> pane.typeForTest("bb"));
+        assertEquals("b", onEdt(() -> pane.table().getClientProperty("dock.speedSearch.needle")),
+                "a repeated letter cycles, so the single letter is what matches");
     }
 
     @Test
@@ -321,28 +357,16 @@ class SpeedSearchTest {
         assertTrue(pane.searchChangedCountForTest() > beforeScroll,
                 "viewport moves must schedule a repaint of the pane itself");
 
+        java.awt.Rectangle anchored = onEdt(pane::searchBadgeBoundsForTest);
         BufferedImage scrolled = render(pane);
         onEdt(pane::searchResetForTest);
         BufferedImage scrolledQuiet = render(pane);
 
-        int[] minX = {Integer.MAX_VALUE};
-        int[] minY = {Integer.MAX_VALUE};
-        int[] count = {0};
-        for (int y = 0; y < scrolled.getHeight(); y++) {
-            for (int x = 0; x < scrolled.getWidth(); x++) {
-                if (scrolled.getRGB(x, y) != scrolledQuiet.getRGB(x, y)) {
-                    count[0]++;
-                    minX[0] = Math.min(minX[0], x);
-                    minY[0] = Math.min(minY[0], y);
-                }
-            }
-        }
-        assertTrue(count[0] > 200,
-                "badge must still paint after scrolling, changed " + count[0]);
-        assertTrue(minY[0] > scrolled.getHeight() * 0.6,
-                "badge stays anchored at the bottom, topmost change y=" + minY[0]);
-        assertTrue(minX[0] < scrolled.getWidth() / 2,
-                "badge stays anchored at the left, leftmost change x=" + minX[0]);
+        assertTrue(changedPixels(scrolledQuiet, scrolled, anchored) > 200,
+                "badge must still paint after scrolling");
+        java.awt.Rectangle list = onEdt(pane::listAreaForTest);
+        assertTrue(anchored.y >= list.y && anchored.y <= list.y + 12,
+                "badge stays anchored over the top of the list: " + anchored);
     }
 
     // ---- helpers ----
@@ -382,6 +406,17 @@ class SpeedSearchTest {
             if (child instanceof java.awt.Container cc) layoutAll(cc);
             else child.doLayout();
         }
+    }
+
+    /** Pixels that differ between two renders inside {@code r}. */
+    private static int changedPixels(BufferedImage a, BufferedImage b, java.awt.Rectangle r) {
+        int n = 0;
+        for (int y = Math.max(0, r.y); y < Math.min(a.getHeight(), r.y + r.height); y++) {
+            for (int x = Math.max(0, r.x); x < Math.min(a.getWidth(), r.x + r.width); x++) {
+                if (a.getRGB(x, y) != b.getRGB(x, y)) n++;
+            }
+        }
+        return n;
     }
 
     private static BufferedImage render(FilePane pane) {

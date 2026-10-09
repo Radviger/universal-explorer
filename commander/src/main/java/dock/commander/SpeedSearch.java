@@ -21,7 +21,11 @@ import javax.swing.UIManager;
  * Names that <em>start</em> with the query always outrank names that merely
  * contain it; a query like "md" only lands on gamma.md when nothing begins
  * with "md". Backspace edits the query, Escape reverts to where the search
- * started, Enter commits and performs the normal open action.
+ * started, Enter commits and performs the normal open action. Ctrl+F
+ * (Cmd+F on a Mac) opens an empty search for those who look for a key
+ * rather than just typing. While a search runs, every row's matching
+ * letters are highlighted (the browser's find-in-page cue) and the badge
+ * — centered over the top of the list — counts the matching rows.
  *
  * <p>Printable characters have no InputMap entries anywhere, so they are
  * intercepted in the table's {@code processKeyEvent}. Backspace / Enter /
@@ -34,6 +38,9 @@ import javax.swing.UIManager;
 final class SpeedSearch {
 
     private static final Color NO_MATCH = new Color(0xE5484D);
+
+    /** Table client property: the text every name cell highlights, or null. */
+    static final String NEEDLE = "dock.speedSearch.needle";
 
     private JTable table;
     private JComponent host;
@@ -116,6 +123,18 @@ final class SpeedSearch {
         } else {
             update(false);
         }
+        changed();
+    }
+
+    /**
+     * Opens an empty search (the hotkey path): the badge shows and waits for
+     * typing; Backspace or Escape closes it again. No-op while one runs.
+     */
+    void start() {
+        if (active) return;
+        active = true;
+        noMatch = false;
+        preSearchRows = table.getSelectedRows().clone();
         changed();
     }
 
@@ -203,12 +222,36 @@ final class SpeedSearch {
         if (needle.isEmpty()) return 0;
         FileTableModel model = (FileTableModel) table.getModel();
         if (row < 0 || row >= model.getRowCount()) return -1;
-        String name = model.row(row).name();
+        return matchAt(model.row(row).name(), needle);
+    }
+
+    /** First case-insensitive occurrence of {@code needle} in {@code name}, or -1. */
+    static int matchAt(String name, String needle) {
         int limit = name.length() - needle.length();
         for (int i = 0; i <= limit; i++) {
             if (name.regionMatches(true, i, needle, 0, needle.length())) return i;
         }
         return -1;
+    }
+
+    /** What the rows match against right now: the query, or its first
+     *  letter while a repeated letter cycles; null without a query. */
+    String needle() {
+        if (!active || query.isEmpty()) return null;
+        return isSingleCharRun(query) ? query.substring(0, 1) : query.toString();
+    }
+
+    /** Rows whose name holds the needle (the ".." shortcut never counts). */
+    int matchCount() {
+        String needle = needle();
+        if (needle == null) return 0;
+        FileTableModel model = (FileTableModel) table.getModel();
+        int n = 0;
+        for (int r = 0; r < model.getRowCount(); r++) {
+            if (!model.row(r).equals(dock.core.fs.FileEntry.PARENT)
+                    && matchIndex(r, needle) >= 0) n++;
+        }
+        return n;
     }
 
     private static boolean isSingleCharRun(CharSequence s) {
@@ -225,25 +268,53 @@ final class SpeedSearch {
 
     void changed() {
         changedCount++;
+        // The name cells read the needle at render time; the host repaint
+        // covers the table beneath it.
+        if (table != null) table.putClientProperty(NEEDLE, needle());
         if (host != null) host.repaint();
     }
 
     // ---- badge ----
 
-    /** Floating query badge, bottom-left of the file area (IntelliJ-style). */
+    /** Where the badge sits over {@code area} (the list's viewport):
+     *  centered across, just below the column headers. */
+    Rectangle badgeBounds(Rectangle area) {
+        if (!active || host == null) return null;
+        FontMetrics fm = host.getFontMetrics(FontRegistry.mono(Tokens.ICON_SMALL));
+        FontMetrics small = host.getFontMetrics(FontRegistry.ui(Tokens.ICON_SMALL));
+        int w = PAD_X + 12 + GAP + fm.stringWidth(queryText())
+                + GAP * 2 + small.stringWidth(countText()) + PAD_X;
+        w = Math.min(Math.max(w, 120), Math.max(120, area.width - 2 * Tokens.GAP_2));
+        return new Rectangle(area.x + (area.width - w) / 2, area.y + Tokens.GAP_2,
+                w, BADGE_H);
+    }
+
+    private static final int PAD_X = 10;
+    private static final int GAP = 6;
+    private static final int BADGE_H = 26;
+
+    private String queryText() {
+        return query.isEmpty() ? "Type to search" : query.toString();
+    }
+
+    private String countText() {
+        if (query.isEmpty()) return "";
+        int n = matchCount();
+        return n == 0 ? "no matches" : n == 1 ? "1 match" : n + " matches";
+    }
+
+    /** Floating query badge over the top of the file list. */
     void paintBadge(Graphics2D g, Rectangle area) {
-        if (!active || host == null) return;
+        Rectangle b = badgeBounds(area);
+        if (b == null) return;
         Font font = FontRegistry.mono(Tokens.ICON_SMALL);
         FontMetrics fm = host.getFontMetrics(font);
+        Font smallFont = FontRegistry.ui(Tokens.ICON_SMALL);
+        FontMetrics small = host.getFontMetrics(smallFont);
         Icon icon = Glyphs.icon(Glyphs.SEARCH, 12, FileTableModel::muted);
-        String text = query.toString();
-
-        int padX = 10;
-        int gap = 6;
-        int h = 26;
-        int w = padX + icon.getIconWidth() + gap + fm.stringWidth(text) + padX;
-        Rectangle b = new Rectangle(area.x + Tokens.GAP_2,
-                area.y + area.height - h - Tokens.GAP_2, Math.max(w, 44), h);
+        String text = queryText();
+        String count = countText();
+        int h = b.height;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         Color bg = UIManager.getColor("Dock.tileBackground");
@@ -255,10 +326,20 @@ final class SpeedSearch {
             g.setColor(border);
             g.drawRoundRect(b.x, b.y, b.width - 1, b.height - 1, Tokens.ARC, Tokens.ARC);
         }
-        icon.paintIcon(host, g, b.x + padX, b.y + (h - icon.getIconHeight()) / 2);
+        java.awt.Shape clip = g.getClip();
+        g.clipRect(b.x, b.y, b.width - PAD_X / 2, b.height);
+        icon.paintIcon(host, g, b.x + PAD_X, b.y + (h - icon.getIconHeight()) / 2);
         g.setFont(font);
-        g.setColor(noMatch ? NO_MATCH : UIManager.getColor("Label.foreground"));
-        int tx = b.x + padX + icon.getIconWidth() + gap;
+        g.setColor(query.isEmpty() ? FileTableModel.muted()
+                : noMatch ? NO_MATCH : UIManager.getColor("Label.foreground"));
+        int tx = b.x + PAD_X + icon.getIconWidth() + GAP;
         g.drawString(text, tx, b.y + (h - fm.getHeight()) / 2 + fm.getAscent());
+        if (!count.isEmpty()) {
+            g.setFont(smallFont);
+            g.setColor(noMatch ? NO_MATCH : FileTableModel.muted());
+            g.drawString(count, b.x + b.width - PAD_X - small.stringWidth(count),
+                    b.y + (h - small.getHeight()) / 2 + small.getAscent());
+        }
+        g.setClip(clip);
     }
 }

@@ -608,6 +608,11 @@ public final class FilePane extends JPanel {
         // the match first. Escape only ever cancels a running search.
         bind(tim, tam, "ENTER", "dock-open", speed::commit);
         bind(tim, tam, "ESCAPE", "dock-speed-escape", speed::escape);
+        // Typing alone searches; the hotkey is for those who reach for one.
+        // Both spellings everywhere: Ctrl+F is the Windows/Linux habit,
+        // Cmd+F the Mac one (and Cmd never reaches the table on the others).
+        bind(tim, tam, "ctrl F", "dock-speed-start", speed::start);
+        bind(tim, tam, "meta F", "dock-speed-start", speed::start);
 
         // Arrow-down from an empty selection must not start on the ".." row:
         // a scan walks down the listing, never up out of the directory. The
@@ -1416,7 +1421,13 @@ public final class FilePane extends JPanel {
     /** Overlays the speed-search badge on top of the file area. */
     @Override protected void paintChildren(java.awt.Graphics g) {
         super.paintChildren(g);
-        speed.paintBadge((java.awt.Graphics2D) g, scroll.getBounds());
+        speed.paintBadge((java.awt.Graphics2D) g, listArea());
+    }
+
+    /** The rows' viewport in pane coordinates — below the column headers. */
+    private java.awt.Rectangle listArea() {
+        return javax.swing.SwingUtilities.convertRectangle(scroll,
+                scroll.getViewport().getBounds(), this);
     }
 
     // ---- test hooks ----
@@ -1466,6 +1477,11 @@ public final class FilePane extends JPanel {
     public boolean searchActiveForTest() { return speed.active(); }
     public String searchQueryForTest() { return speed.query(); }
     public boolean searchNoMatchForTest() { return speed.noMatch(); }
+    public int searchMatchCountForTest() { return speed.matchCount(); }
+    /** Where the badge paints, in pane coordinates; null while hidden. */
+    public java.awt.Rectangle searchBadgeBoundsForTest() { return speed.badgeBounds(listArea()); }
+    /** The rows' viewport in pane coordinates. */
+    public java.awt.Rectangle listAreaForTest() { return listArea(); }
 
     private static JButton toolButton(String glyph, String tooltip) {
         // Uniform ink scaling keeps thin chevrons and dense glyphs the same

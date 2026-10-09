@@ -6,6 +6,7 @@ import dock.core.fs.FileEntry;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.Rectangle;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -166,6 +167,9 @@ public final class FileTableModel extends AbstractTableModel {
     static final class NameRenderer extends DefaultTableCellRenderer {
         private final Font plain = FontRegistry.mono();
         private final Font dirFont = FontRegistry.monoMedium(FontRegistry.BASE_SIZE);
+        /** The speed-search hit in this cell's name: start and length, or -1. */
+        private int hitStart = -1;
+        private int hitLength;
 
         NameRenderer() {
             setIconTextGap(Tokens.GAP_2);
@@ -191,7 +195,73 @@ public final class FileTableModel extends AbstractTableModel {
             } else {
                 setFont(plain);
             }
+            hitStart = -1;
+            if (!e.equals(FileEntry.PARENT)
+                    && table.getClientProperty(SpeedSearch.NEEDLE) instanceof String needle) {
+                hitStart = SpeedSearch.matchAt(e.name(), needle);
+                hitLength = needle.length();
+            }
             return c;
+        }
+
+        /** The highlighted run as {start, length}; null when none (tests). */
+        int[] hitForTest() {
+            return hitStart < 0 ? null : new int[] {hitStart, hitLength};
+        }
+
+        /**
+         * The browser's find-in-page cue: a marker behind the matching
+         * letters, painted under the text. The background is filled here
+         * first, so the label paints transparent over the marker.
+         */
+        @Override protected void paintComponent(java.awt.Graphics g) {
+            Rectangle hit = hitStart < 0 ? null : hitRect(g);
+            if (hit == null) {
+                super.paintComponent(g);
+                return;
+            }
+            boolean opaque = isOpaque();
+            if (opaque) {
+                g.setColor(getBackground());
+                g.fillRect(0, 0, getWidth(), getHeight());
+            }
+            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            Color mark = UIManager.getColor("Dock.searchHit");
+            g2.setColor(mark != null ? mark : new Color(0xE0, 0xAF, 0x68, 0x70));
+            g2.fillRoundRect(hit.x, hit.y, hit.width, hit.height, 4, 4);
+            g2.dispose();
+            setOpaque(false);
+            try {
+                super.paintComponent(g);
+            } finally {
+                setOpaque(opaque);
+            }
+        }
+
+        /** The marker's box over the visible (possibly elided) text, or null
+         *  when the hit lies beyond what the column shows. */
+        private Rectangle hitRect(java.awt.Graphics g) {
+            String text = getText();
+            if (text == null || hitStart + hitLength > text.length()) return null;
+            java.awt.FontMetrics fm = g.getFontMetrics(getFont());
+            java.awt.Insets in = getInsets();
+            Rectangle view = new Rectangle(in.left, in.top,
+                    getWidth() - in.left - in.right, getHeight() - in.top - in.bottom);
+            Rectangle iconR = new Rectangle();
+            Rectangle textR = new Rectangle();
+            String shown = javax.swing.SwingUtilities.layoutCompoundLabel(this, fm, text,
+                    getIcon(), getVerticalAlignment(), getHorizontalAlignment(),
+                    getVerticalTextPosition(), getHorizontalTextPosition(),
+                    view, iconR, textR, getIconTextGap());
+            int visible = shown.equals(text) ? text.length()
+                    : Math.max(0, shown.length() - 3);   // the "..." elision
+            if (hitStart >= visible) return null;
+            int end = Math.min(hitStart + hitLength, visible);
+            int x = textR.x + fm.stringWidth(text.substring(0, hitStart));
+            int w = fm.stringWidth(text.substring(hitStart, end));
+            return new Rectangle(x - 1, textR.y, w + 2, textR.height);
         }
     }
 
