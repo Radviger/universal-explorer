@@ -1,8 +1,10 @@
 package dock.smb;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import org.junit.jupiter.api.Test;
@@ -65,6 +67,75 @@ class SmbHealTest {
                         () -> { throw new IllegalStateException("still failing"); },
                         () -> false,
                         () -> { }));
+    }
+
+    @Test
+    void creditExhaustionOnALiveLineTakesTheForcedRedial() throws Exception {
+        int[] calls = {0};
+        int[] heals = {0};
+        int[] forced = {0};
+        String out = SmbFs.selfHeal(
+                () -> {
+                    calls[0]++;
+                    if (calls[0] == 1) {
+                        throw new IllegalStateException(
+                                "Not enough credits (0 available) to hand out 8 sequence numbers");
+                    }
+                    return "ok";
+                },
+                () -> true,
+                () -> heals[0]++,
+                () -> forced[0]++);
+        assertEquals("ok", out);
+        assertEquals(2, calls[0]);
+        assertEquals(0, heals[0], "the liveness-gated heal must not run for a wedged line");
+        assertEquals(1, forced[0], "the forced redial runs although the socket is connected");
+    }
+
+    @Test
+    void aTimedOutRequestRefusesTheLivenessGatedHeal() {
+        int[] heals = {0};
+        assertThrows(java.io.IOException.class, () ->
+                SmbFs.selfHeal(
+                        () -> { throw wrappedTimeout(); },
+                        () -> true,
+                        () -> heals[0]++,
+                        () -> { }));
+        assertEquals(0, heals[0]);
+    }
+
+    @Test
+    void timeoutCausesForcedRedialAndRetry() throws Exception {
+        int[] calls = {0};
+        int[] forced = {0};
+        String out = SmbFs.selfHeal(
+                () -> {
+                    calls[0]++;
+                    if (calls[0] == 1) throw wrappedTimeout();
+                    return "ok";
+                },
+                () -> true,
+                () -> { throw new AssertionError("liveness-gated heal must not run"); },
+                () -> forced[0]++);
+        assertEquals("ok", out);
+        assertEquals(2, calls[0]);
+        assertEquals(1, forced[0]);
+    }
+
+    @Test
+    void beyondRescueRecognizesTheWedgedShapes() {
+        assertTrue(SmbFs.lineBeyondRescue(wrappedTimeout()));
+        assertTrue(SmbFs.lineBeyondRescue(new IllegalStateException(
+                "Not enough credits (0 available) to hand out 8 sequence numbers")));
+        assertTrue(SmbFs.lineBeyondRescue(new java.io.IOException("read failed",
+                new IllegalStateException("Not enough credits (1 available)"))));
+        assertFalse(SmbFs.lineBeyondRescue(new IllegalStateException("STATUS_ACCESS_DENIED")));
+        assertFalse(SmbFs.lineBeyondRescue(new java.io.IOException("connection reset")));
+    }
+
+    private static java.io.IOException wrappedTimeout() {
+        return new java.io.IOException("request failed",
+                new java.util.concurrent.TimeoutException("future not completed"));
     }
 
     @Test

@@ -209,6 +209,7 @@ public final class MediaBridge {
             throws IOException {
         Flight mine = new Flight(ex, new AtomicReference<>());
         source.flights.add(mine);
+        long done = 0;
         try {
             FileSystem view = source.fs.streamView();
             try {
@@ -216,7 +217,6 @@ public final class MediaBridge {
                      OutputStream out = ex.getResponseBody()) {
                     mine.in().set(in);
                     byte[] buf = new byte[64 * 1024];
-                    long done = 0;
                     while (done < length) {
                         int want = (int) Math.min(buf.length, length - done);
                         int n = in.read(buf, 0, want);
@@ -230,10 +230,21 @@ public final class MediaBridge {
                     try { view.close(); } catch (Exception ignored) {}
                 }
             }
+        } catch (IOException | RuntimeException e) {
+            if (done < length && DEBUG.getAsBoolean()) {
+                System.err.printf(
+                        "dock-media: copy of %s at %d stopped after %d of %d bytes: %s%n",
+                        source.path, start, done, length, String.valueOf(e));
+                e.printStackTrace(System.err);
+            }
+            throw e;
         } finally {
             source.flights.remove(mine);
         }
     }
+
+    private static final java.util.function.BooleanSupplier DEBUG =
+            () -> Boolean.getBoolean("dock.media.debug");
 
     /**
      * Parses a single {@code bytes=a-b} / {@code bytes=a-} / {@code bytes=-n}

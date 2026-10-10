@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 
@@ -96,23 +97,36 @@ public final class SmbFs implements FileSystem {
     interface HealAction { void run() throws IOException; }
 
     private <T> T onWire(WireOp<T> op) throws IOException {
-        return selfHeal(op, this::connectionAlive, this::healLine);
+        return selfHeal(op, this::connectionAlive, this::healLine, this::redial);
     }
 
-    /**
-     * The heal-and-retry rule as a pure function (tested without a server):
-     * a failure on a dead line redials and retries the operation once;
-     * a failure on a live line is genuine and propagates as-is.
-     */
     static <T> T selfHeal(WireOp<T> op, BooleanSupplier lineAlive, HealAction healLine)
             throws IOException {
+        return selfHeal(op, lineAlive, healLine, healLine);
+    }
+
+    static <T> T selfHeal(WireOp<T> op, BooleanSupplier lineAlive, HealAction healLine,
+                          HealAction forceLine) throws IOException {
         try {
             return op.run();
         } catch (IOException | RuntimeException e) {
-            if (lineAlive.getAsBoolean()) throw e;
-            healLine.run();
+            if (lineBeyondRescue(e)) {
+                forceLine.run();
+            } else {
+                if (lineAlive.getAsBoolean()) throw e;
+                healLine.run();
+            }
             return op.run();
         }
+    }
+
+    static boolean lineBeyondRescue(Throwable e) {
+        for (Throwable c = e; c != null; c = c.getCause()) {
+            if (c instanceof TimeoutException) return true;
+            String message = c.getMessage();
+            if (message != null && message.contains("Not enough credits")) return true;
+        }
+        return false;
     }
 
     /** Dials a fresh line unconditionally (manual "Reconnect now"). */
@@ -367,35 +381,59 @@ public final class SmbFs implements FileSystem {
         if (share == null || rest == null || rest.isEmpty()) {
             throw new IOException("Not a file: " + p);
         }
+        return new PositionedRead(share, rest, offset);
+    }
+
+    private File openFileAt(String share, String rest) throws IOException {
         try {
-            File f = shareFor(share).openFile(rest,
+            return shareFor(share).openFile(rest,
                     EnumSet.of(AccessMask.FILE_READ_DATA),
                     EnumSet.of(FileAttributes.FILE_ATTRIBUTE_NORMAL), SMB2ShareAccess.ALL,
                     SMB2CreateDisposition.FILE_OPEN,
                     EnumSet.of(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE));
-            return new InputStream() {
-                private long at = offset;
-
-                @Override public int read(byte[] b, int off, int len) throws IOException {
-                    if (len == 0) return 0;
-                    int n = f.read(b, at, off, len);
-                    if (n < 0) return -1;
-                    at += n;
-                    return n;
-                }
-
-                @Override public int read() throws IOException {
-                    byte[] one = new byte[1];
-                    int n = read(one, 0, 1);
-                    return n < 0 ? -1 : (one[0] & 0xFF);
-                }
-
-                @Override public void close() throws IOException {
-                    f.close();
-                }
-            };
         } catch (SMBApiException e) {
             throw new IOException(e.getMessage(), e);
+        }
+    }
+
+    private final class PositionedRead extends InputStream {
+        private final String share;
+        private final String rest;
+        private long at;
+        private File f;
+
+        PositionedRead(String share, String rest, long offset) throws IOException {
+            this.share = share;
+            this.rest = rest;
+            this.at = offset;
+            this.f = openFileAt(share, rest);
+        }
+
+        @Override public int read(byte[] b, int off, int len) throws IOException {
+            if (len == 0) return 0;
+            int n;
+            try {
+                n = f.read(b, at, off, len);
+            } catch (RuntimeException e) {
+                if (!lineBeyondRescue(e)) throw e;
+                redial();
+                try { f.close(); } catch (Exception ignored) {}
+                f = openFileAt(share, rest);
+                n = f.read(b, at, off, len);
+            }
+            if (n < 0) return -1;
+            at += n;
+            return n;
+        }
+
+        @Override public int read() throws IOException {
+            byte[] one = new byte[1];
+            int n = read(one, 0, 1);
+            return n < 0 ? -1 : (one[0] & 0xFF);
+        }
+
+        @Override public void close() throws IOException {
+            f.close();
         }
     }
 
