@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -250,10 +251,10 @@ class SpeedSearchTest {
     }
 
     @Test
-    void badgePaintsInLowerLeftOfFileArea() {
+    void badgeSitsCenteredOverTheTopOfTheList() {
         FilePane pane = paneReady(6);
-        // Pre-select the row the search will land on, so the only pixel
-        // difference while searching is the badge itself.
+        // Pre-select the row the search will land on, so the pixel changes
+        // while searching are the badge and the name highlight.
         onEdt(() -> pane.table().setRowSelectionInterval(5, 5));
         pane.setSize(760, 480);
         onEdt(() -> layoutAll(pane));
@@ -262,33 +263,240 @@ class SpeedSearchTest {
         onEdt(() -> pane.typeForTest("re"));
         BufferedImage after = render(pane);
 
-        int[] minX = {Integer.MAX_VALUE};
-        int[] minY = {Integer.MAX_VALUE};
-        int[] count = {0};
-        for (int y = 0; y < before.getHeight(); y++) {
-            for (int x = 0; x < before.getWidth(); x++) {
-                if (before.getRGB(x, y) != after.getRGB(x, y)) {
-                    count[0]++;
-                    minX[0] = Math.min(minX[0], x);
-                    minY[0] = Math.min(minY[0], y);
-                }
-            }
-        }
-        assertTrue(count[0] > 200, "badge must paint pixels, changed " + count[0]);
-        assertTrue(minY[0] > after.getHeight() * 0.6,
-                "badge sits at the bottom, topmost change at y=" + minY[0]);
-        assertTrue(minX[0] < after.getWidth() / 2,
-                "badge sits at the left, leftmost change at x=" + minX[0]);
+        java.awt.Rectangle badge = onEdt(pane::searchBadgeBoundsForTest);
+        java.awt.Rectangle list = onEdt(pane::listAreaForTest);
+        assertTrue(Math.abs(badge.getCenterX() - list.getCenterX()) <= 1,
+                "centered across the list: badge " + badge + " list " + list);
+        assertTrue(badge.y >= list.y && badge.y <= list.y + 12,
+                "just below the column headers: badge " + badge + " list " + list);
+        assertTrue(changedPixels(before, after, badge) > 200, "the badge paints");
 
         onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        assertEquals(null, onEdt(pane::searchBadgeBoundsForTest));
         BufferedImage reverted = render(pane);
-        int changed = 0;
-        for (int y = 0; y < before.getHeight(); y++) {
-            for (int x = 0; x < before.getWidth(); x++) {
-                if (before.getRGB(x, y) != reverted.getRGB(x, y)) changed++;
+        assertEquals(0, changedPixels(before, reverted,
+                new java.awt.Rectangle(0, 0, before.getWidth(), before.getHeight())),
+                "Escape restores the pre-search pixels, highlight included");
+    }
+
+    @Test
+    void ctrlOrCmdFOpensAnEmptySearchThatTypingFills() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        assertTrue(pane.searchActiveForTest(), "the hotkey opens the search");
+        assertEquals("", pane.searchQueryForTest());
+        assertTrue(onEdt(pane::searchBadgeBoundsForTest) != null, "the badge shows at once");
+
+        onEdt(() -> pane.typeForTest("re"));
+        assertEquals("re", pane.searchQueryForTest());
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "readme.md");
+
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        onEdt(() -> pane.fireTableActionForTest("meta F"));
+        assertTrue(pane.searchActiveForTest(), "Cmd+F is the Mac spelling");
+    }
+
+    @Test
+    void backspaceClosesAnEmptySearchWithoutLeavingTheFolder() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        onEdt(() -> pane.fireTableActionForTest("BACK_SPACE"));
+        assertFalse(pane.searchActiveForTest());
+        assertEquals("/home/user", pane.path(), "closing the search is not navigation");
+    }
+
+    @Test
+    void theBadgeCountsEveryRowHoldingTheQuery() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        assertEquals(2, onEdt(pane::searchMatchCountForTest), "gamma.md and readme.md");
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        onEdt(() -> pane.typeForTest("."));
+        assertEquals(4, onEdt(pane::searchMatchCountForTest),
+                "every dotted file, never the '..' shortcut");
+    }
+
+    @Test
+    void arrowsHopBetweenMatchesAndKeepTheSearchOpen() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()), "gamma.md");
+        assertEquals("1/2", onEdt(pane::searchCountTextForTest));
+
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_DOWN));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "readme.md");
+        assertTrue(pane.searchActiveForTest(), "the search stays open");
+        assertEquals("md", pane.searchQueryForTest());
+        assertEquals("2/2", onEdt(pane::searchCountTextForTest));
+
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_DOWN));
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()), "wraps to gamma.md");
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_UP));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "wraps back up");
+    }
+
+    @Test
+    void theArrowBindingsHopTooWhileSearching() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        onEdt(() -> pane.fireTableActionForTest("DOWN"));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()));
+        onEdt(() -> pane.fireTableActionForTest("UP"));
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()));
+        assertTrue(pane.searchActiveForTest());
+    }
+
+    @Test
+    void withoutAQueryTheArrowsWalkEveryRow() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.table().setRowSelectionInterval(2, 2));
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));   // open, nothing typed
+        onEdt(() -> pane.fireTableActionForTest("DOWN"));
+        assertEquals(3, onEdt(() -> pane.table().getSelectedRow()), "one row down, as usual");
+        assertTrue(pane.searchActiveForTest(), "the empty search stays open");
+    }
+
+    @Test
+    void arrowsWithNothingToHopToStayPut() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.table().setRowSelectionInterval(2, 2));
+        onEdt(() -> pane.typeForTest("qx"));
+        assertTrue(pane.searchNoMatchForTest());
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_DOWN));
+        assertEquals(2, onEdt(() -> pane.table().getSelectedRow()));
+        assertTrue(pane.searchActiveForTest());
+        assertEquals("no matches", onEdt(pane::searchCountTextForTest));
+    }
+
+    @Test
+    void theCountReadsAsATotalOffAMatch() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        onEdt(() -> pane.table().setRowSelectionInterval(1, 1));   // beta, not a match
+        assertEquals("2 matches", onEdt(pane::searchCountTextForTest));
+    }
+
+    /** Fires the search box's own binding for a key (the caret-in-box path). */
+    private static void fieldKey(FilePane pane, String spec) {
+        onEdt(() -> {
+            var f = pane.searchFieldForTest();
+            Object name = f.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
+                    .get(javax.swing.KeyStroke.getKeyStroke(spec));
+            f.getActionMap().get(name).actionPerformed(
+                    new java.awt.event.ActionEvent(f, 0, "test"));
+        });
+    }
+
+    @Test
+    void theBoxIsWideEnoughToReadAQuery() {
+        FilePane pane = paneReady(6);
+        pane.setSize(760, 480);
+        onEdt(() -> layoutAll(pane));
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        assertTrue(onEdt(pane::searchBadgeBoundsForTest).width >= 340,
+                "box " + onEdt(pane::searchBadgeBoundsForTest));
+    }
+
+    @Test
+    void typingIntoTheTableFillsTheBox() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("re"));
+        assertEquals("re", onEdt(() -> pane.searchFieldForTest().getText()));
+    }
+
+    @Test
+    void aPasteIntoTheBoxSearches() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        onEdt(() -> pane.searchFieldForTest().replaceSelection("gam"));
+        assertEquals("gam", pane.searchQueryForTest());
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()), "gamma.md");
+        onEdt(() -> pane.searchFieldForTest().replaceSelection("ma"));
+        assertEquals("gamma", pane.searchQueryForTest(), "typing on after the paste");
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()));
+    }
+
+    @Test
+    void editingInsideTheBoxRematches() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("gamma"));
+        onEdt(() -> pane.searchFieldForTest().setText("readme"));
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "readme.md");
+        assertTrue(pane.searchActiveForTest());
+    }
+
+    @Test
+    void backspaceInAnEmptyBoxClosesTheSearch() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.fireTableActionForTest("ctrl F"));
+        fieldKey(pane, "BACK_SPACE");
+        assertFalse(pane.searchActiveForTest());
+        assertEquals(null, onEdt(pane::searchBadgeBoundsForTest), "the box hides");
+    }
+
+    @Test
+    void backspaceInTheBoxDeletesWhileThereIsText() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("re"));
+        onEdt(() -> pane.searchFieldForTest().setCaretPosition(2));
+        fieldKey(pane, "BACK_SPACE");
+        assertEquals("r", pane.searchQueryForTest());
+        assertTrue(pane.searchActiveForTest());
+    }
+
+    @Test
+    void enterAndArrowsDriveTheSearchFromInsideTheBox() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        fieldKey(pane, "DOWN");
+        assertEquals(5, onEdt(() -> pane.table().getSelectedRow()), "hops to readme.md");
+        fieldKey(pane, "UP");
+        assertEquals(4, onEdt(() -> pane.table().getSelectedRow()));
+        fieldKey(pane, "ESCAPE");
+        assertFalse(pane.searchActiveForTest());
+
+        onEdt(() -> pane.typeForTest("be"));
+        fieldKey(pane, "ENTER");
+        await(() -> pane.path().equals("/home/user/beta"));
+    }
+
+    @Test
+    void theTableCountsTheSearchBoxAsItsOwnFocus() {
+        FilePane pane = paneReady(6);
+        assertTrue(onEdt(() -> pane.table().getClientProperty("JComponent.focusOwner"))
+                instanceof java.util.function.Predicate<?>,
+                "FlatLaf asks the pane whether the table is focused");
+    }
+
+    @Test
+    void theSelectionKeepsItsFocusedColorWhileTheBoxIsFocusedAndDimsAfter() {
+        FilePane pane = paneReady(6);
+        java.awt.Color active = javax.swing.UIManager.getColor("Table.selectionBackground");
+        java.awt.Color inactive = javax.swing.UIManager.getColor("Table.selectionInactiveBackground");
+        // Nothing holds the focus here (no window), so the synced state is the
+        // unfocused one; a focus event on the box re-syncs either way.
+        onEdt(() -> pane.table().setSelectionBackground(active));
+        onEdt(() -> {
+            var f = pane.searchFieldForTest();
+            for (var l : f.getFocusListeners()) {
+                l.focusLost(new java.awt.event.FocusEvent(f, java.awt.event.FocusEvent.FOCUS_LOST));
             }
-        }
-        assertEquals(0, changed, "Escape restores the pre-search pixels");
+        });
+        onEdt(() -> { });   // the deferred re-sync
+        assertSame(inactive, onEdt(() -> pane.table().getSelectionBackground()),
+                "focus gone from both: the selection dims like any unfocused table");
+    }
+
+    @Test
+    void theNameCellsLearnWhatToHighlight() {
+        FilePane pane = paneReady(6);
+        onEdt(() -> pane.typeForTest("md"));
+        assertEquals("md", onEdt(() -> pane.table().getClientProperty("dock.speedSearch.needle")));
+        onEdt(() -> pane.pressForTest(java.awt.event.KeyEvent.VK_ESCAPE));
+        assertEquals(null, onEdt(() -> pane.table().getClientProperty("dock.speedSearch.needle")));
+        onEdt(() -> pane.typeForTest("bb"));
+        assertEquals("b", onEdt(() -> pane.table().getClientProperty("dock.speedSearch.needle")),
+                "a repeated letter cycles, so the single letter is what matches");
     }
 
     @Test
@@ -321,28 +529,16 @@ class SpeedSearchTest {
         assertTrue(pane.searchChangedCountForTest() > beforeScroll,
                 "viewport moves must schedule a repaint of the pane itself");
 
+        java.awt.Rectangle anchored = onEdt(pane::searchBadgeBoundsForTest);
         BufferedImage scrolled = render(pane);
         onEdt(pane::searchResetForTest);
         BufferedImage scrolledQuiet = render(pane);
 
-        int[] minX = {Integer.MAX_VALUE};
-        int[] minY = {Integer.MAX_VALUE};
-        int[] count = {0};
-        for (int y = 0; y < scrolled.getHeight(); y++) {
-            for (int x = 0; x < scrolled.getWidth(); x++) {
-                if (scrolled.getRGB(x, y) != scrolledQuiet.getRGB(x, y)) {
-                    count[0]++;
-                    minX[0] = Math.min(minX[0], x);
-                    minY[0] = Math.min(minY[0], y);
-                }
-            }
-        }
-        assertTrue(count[0] > 200,
-                "badge must still paint after scrolling, changed " + count[0]);
-        assertTrue(minY[0] > scrolled.getHeight() * 0.6,
-                "badge stays anchored at the bottom, topmost change y=" + minY[0]);
-        assertTrue(minX[0] < scrolled.getWidth() / 2,
-                "badge stays anchored at the left, leftmost change x=" + minX[0]);
+        assertTrue(changedPixels(scrolledQuiet, scrolled, anchored) > 200,
+                "badge must still paint after scrolling");
+        java.awt.Rectangle list = onEdt(pane::listAreaForTest);
+        assertTrue(anchored.y >= list.y && anchored.y <= list.y + 12,
+                "badge stays anchored over the top of the list: " + anchored);
     }
 
     // ---- helpers ----
@@ -382,6 +578,17 @@ class SpeedSearchTest {
             if (child instanceof java.awt.Container cc) layoutAll(cc);
             else child.doLayout();
         }
+    }
+
+    /** Pixels that differ between two renders inside {@code r}. */
+    private static int changedPixels(BufferedImage a, BufferedImage b, java.awt.Rectangle r) {
+        int n = 0;
+        for (int y = Math.max(0, r.y); y < Math.min(a.getHeight(), r.y + r.height); y++) {
+            for (int x = Math.max(0, r.x); x < Math.min(a.getWidth(), r.x + r.width); x++) {
+                if (a.getRGB(x, y) != b.getRGB(x, y)) n++;
+            }
+        }
+        return n;
     }
 
     private static BufferedImage render(FilePane pane) {

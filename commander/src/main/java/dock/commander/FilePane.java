@@ -67,6 +67,22 @@ public final class FilePane extends JPanel {
     // them in processKeyEvent before the table's default (no-op) handling.
     private final SpeedTable table = new SpeedTable(model);
     private final JScrollPane scroll = new JScrollPane(table);
+    /** The list with the speed-search box floating over its top edge. */
+    private final javax.swing.JLayeredPane listHost = new javax.swing.JLayeredPane() {
+        {
+            add(scroll, javax.swing.JLayeredPane.DEFAULT_LAYER);
+            add(speed.box(), javax.swing.JLayeredPane.PALETTE_LAYER);
+        }
+
+        @Override public void doLayout() {
+            scroll.setBounds(0, 0, getWidth(), getHeight());
+            scroll.doLayout();
+            speed.box().setBounds(SpeedSearch.boxBounds(scroll.getViewport().getBounds()));
+        }
+
+        @Override public Dimension getPreferredSize() { return scroll.getPreferredSize(); }
+        @Override public Dimension getMinimumSize() { return scroll.getMinimumSize(); }
+    };
 
     /**
      * The pane's table. Printable keys arrive here (key events dispatched
@@ -173,16 +189,16 @@ public final class FilePane extends JPanel {
     public FilePane(FileSystem fs) {
         this.fs = fs;
         speed.attach(table, this, this::openSelected);
-        // The speed-search badge is painted over this scroll pane by the
-        // pane itself. Blit scrolling would copy the badge's pixels along
-        // with the table, and viewport scroll damage alone repaints only
-        // the table — so disable the blit and put the damage on the pane
-        // (badge included) whenever the view moves.
+        // The speed-search box floats over this scroll pane in a layer of
+        // its own. Blit scrolling would copy the box's pixels along with
+        // the table, and viewport scroll damage alone repaints only the
+        // table — so disable the blit and put the damage on the pane (box
+        // included) whenever the view moves.
         scroll.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
         scroll.getViewport().addChangeListener(e -> speed.changed());
         setLayout(new BorderLayout());
         add(buildToolbar(), BorderLayout.NORTH);
-        add(scroll, BorderLayout.CENTER);
+        add(listHost, BorderLayout.CENTER);
         add(buildSummary(), BorderLayout.SOUTH);
         configureTable();
         bindKeys();
@@ -608,6 +624,11 @@ public final class FilePane extends JPanel {
         // the match first. Escape only ever cancels a running search.
         bind(tim, tam, "ENTER", "dock-open", speed::commit);
         bind(tim, tam, "ESCAPE", "dock-speed-escape", speed::escape);
+        // Typing alone searches; the hotkey is for those who reach for one.
+        // Both spellings everywhere: Ctrl+F is the Windows/Linux habit,
+        // Cmd+F the Mac one (and Cmd never reaches the table on the others).
+        bind(tim, tam, "ctrl F", "dock-speed-start", speed::start);
+        bind(tim, tam, "meta F", "dock-speed-start", speed::start);
 
         // Arrow-down from an empty selection must not start on the ".." row:
         // a scan walks down the listing, never up out of the directory. The
@@ -615,9 +636,20 @@ public final class FilePane extends JPanel {
         // real entry instead (the same row every keyboard landing picks).
         // ".." stays reachable with arrow-up, and a directory holding nothing
         // else still selects it.
+        // While a speed search has a query, both arrows hop between its
+        // matches instead (the key path catches them first; the bindings
+        // route here too, so either order lands the same).
         javax.swing.Action stockNextRow = tam.get("selectNextRow");
+        javax.swing.Action stockPrevRow = tam.get("selectPreviousRow");
+        tam.put("selectPreviousRow", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (speed.step(-1)) return;
+                stockPrevRow.actionPerformed(e);
+            }
+        });
         tam.put("selectNextRow", new AbstractAction() {
             @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (speed.step(1)) return;
                 int first = table.getSelectedRow() < 0 ? firstRealRow() : -1;
                 if (first > 0) {
                     table.changeSelection(first, 0, false, false);
@@ -1413,10 +1445,10 @@ public final class FilePane extends JPanel {
 
     // ---- helpers ----
 
-    /** Overlays the speed-search badge on top of the file area. */
-    @Override protected void paintChildren(java.awt.Graphics g) {
-        super.paintChildren(g);
-        speed.paintBadge((java.awt.Graphics2D) g, scroll.getBounds());
+    /** The rows' viewport in pane coordinates — below the column headers. */
+    private java.awt.Rectangle listArea() {
+        return javax.swing.SwingUtilities.convertRectangle(scroll,
+                scroll.getViewport().getBounds(), this);
     }
 
     // ---- test hooks ----
@@ -1466,6 +1498,19 @@ public final class FilePane extends JPanel {
     public boolean searchActiveForTest() { return speed.active(); }
     public String searchQueryForTest() { return speed.query(); }
     public boolean searchNoMatchForTest() { return speed.noMatch(); }
+    public int searchMatchCountForTest() { return speed.matchCount(); }
+    public String searchCountTextForTest() { return speed.countText(); }
+    /** Where the search box sits, in pane coordinates; null while hidden. */
+    public java.awt.Rectangle searchBadgeBoundsForTest() {
+        javax.swing.JComponent box = speed.box();
+        return box.isVisible()
+                ? javax.swing.SwingUtilities.convertRectangle(listHost, box.getBounds(), this)
+                : null;
+    }
+    /** The search box's text field — typed into, pasted into (tests). */
+    public javax.swing.JTextField searchFieldForTest() { return speed.field(); }
+    /** The rows' viewport in pane coordinates. */
+    public java.awt.Rectangle listAreaForTest() { return listArea(); }
 
     private static JButton toolButton(String glyph, String tooltip) {
         // Uniform ink scaling keeps thin chevrons and dense glyphs the same
